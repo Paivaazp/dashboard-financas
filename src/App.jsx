@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-const supabase = createClient(supabaseUrl, supabaseKey);
+const hasSupabaseConfig = Boolean(supabaseUrl && supabaseKey);
+const supabase = hasSupabaseConfig ? createClient(supabaseUrl, supabaseKey) : null;
 
 const CARDS = [
-  { id: "nubank", name: "Nubank", color: "#8A05BE", text: "#FFFFFF" },
-  { id: "picpay", name: "PicPay", color: "#21C25E", text: "#0B2E1B" },
-  { id: "santander", name: "Santander", color: "#EC0000", text: "#FFFFFF" },
-  { id: "dinheiro", name: "Dinheiro/Outro", color: "#3A3F38", text: "#FFFFFF" },
+  { id: "nubank", name: "Nubank", short: "Nu", color: "#8A05BE", text: "#FFFFFF", icon: "◫" },
+  { id: "picpay", name: "PicPay", short: "Pi", color: "#21C25E", text: "#071D12", icon: "◩" },
+  { id: "santander", name: "Santander", short: "St", color: "#EC0000", text: "#FFFFFF", icon: "◭" },
+  { id: "dinheiro", name: "Dinheiro/Outro", short: "R$", color: "#313743", text: "#FFFFFF", icon: "◉" },
 ];
 
 const DEFAULT_CATEGORIES = [
@@ -24,6 +24,10 @@ const DEFAULT_CATEGORIES = [
 ];
 
 const MONTHS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const FULL_MONTHS = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 function fmt(v) {
   return (Number(v) || 0).toLocaleString("pt-BR", {
@@ -41,7 +45,31 @@ function todayISO() {
 }
 
 function parseMoney(value) {
-  return parseFloat(String(value).replace(",", ".")) || 0;
+  const normalized = String(value || "")
+    .replace(/\s/g, "")
+    .replace("R$", "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+
+  return parseFloat(normalized) || 0;
+}
+
+function formatDateBR(date) {
+  if (!date) return "";
+  return date.split("-").reverse().join("/");
+}
+
+function makeCategoryId(label) {
+  return (
+    label
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "") +
+    "-" +
+    Date.now().toString(36).slice(-4)
+  );
 }
 
 function fromDbEntry(row) {
@@ -56,6 +84,7 @@ function fromDbEntry(row) {
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState("home");
   const [authLoaded, setAuthLoaded] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [session, setSession] = useState(null);
@@ -86,12 +115,82 @@ export default function App() {
   const [newCatLabel, setNewCatLabel] = useState("");
   const [addingCat, setAddingCat] = useState(false);
   const [cardFilter, setCardFilter] = useState(null);
+  const [listFilterCard, setListFilterCard] = useState(null);
+  const [listSearch, setListSearch] = useState("");
   const [saveError, setSaveError] = useState("");
   const [syncing, setSyncing] = useState(false);
 
-  const user = session?.user;
+  const user = session?.user || null;
+
+  const loadData = useCallback(async (userId, options = {}) => {
+    if (!supabase || !userId) return;
+
+    try {
+      if (!options.silent) setDataLoaded(false);
+      setSaveError("");
+
+      const { data: settingsData, error: settingsError } = await supabase
+        .from("finance_settings")
+        .select("*")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (settingsError) throw settingsError;
+
+      if (settingsData) {
+        const nextSalary = Number(settingsData.salary) || 0;
+        const nextCategories =
+          Array.isArray(settingsData.categories) && settingsData.categories.length > 0
+            ? settingsData.categories
+            : DEFAULT_CATEGORIES;
+
+        setSalary(nextSalary);
+        setSalaryInput(String(settingsData.salary ?? ""));
+        setCategories(nextCategories);
+
+        setForm((old) => ({
+          ...old,
+          categoryId: nextCategories.some((cat) => cat.id === old.categoryId)
+            ? old.categoryId
+            : nextCategories[0]?.id || "outros",
+        }));
+      } else {
+        const { error: insertSettingsError } = await supabase.from("finance_settings").insert({
+          user_id: userId,
+          salary: 0,
+          categories: DEFAULT_CATEGORIES,
+        });
+
+        if (insertSettingsError) throw insertSettingsError;
+
+        setSalary(0);
+        setSalaryInput("");
+        setCategories(DEFAULT_CATEGORIES);
+      }
+
+      const { data: entriesData, error: entriesError } = await supabase
+        .from("finance_entries")
+        .select("*")
+        .eq("user_id", userId)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (entriesError) throw entriesError;
+      setEntries((entriesData || []).map(fromDbEntry));
+    } catch (err) {
+      console.error(err);
+      setSaveError("Erro ao carregar dados do Supabase.");
+    } finally {
+      setDataLoaded(true);
+    }
+  }, []);
 
   useEffect(() => {
+    if (!supabase) {
+      setAuthLoaded(true);
+      return undefined;
+    }
+
     async function initAuth() {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
@@ -116,65 +215,34 @@ export default function App() {
     }
 
     loadData(user.id);
-  }, [user?.id]);
+  }, [user?.id, loadData]);
 
-  async function loadData(userId) {
-    try {
-      setDataLoaded(false);
-      setSaveError("");
+  useEffect(() => {
+    if (!user) return undefined;
 
-      const { data: settingsData, error: settingsError } = await supabase
-        .from("finance_settings")
-        .select("*")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (settingsError) throw settingsError;
-
-      if (settingsData) {
-        setSalary(Number(settingsData.salary) || 0);
-        setSalaryInput(String(settingsData.salary ?? ""));
-        setCategories(
-          Array.isArray(settingsData.categories) && settingsData.categories.length > 0
-            ? settingsData.categories
-            : DEFAULT_CATEGORIES
-        );
-      } else {
-        const { error: insertSettingsError } = await supabase
-          .from("finance_settings")
-          .insert({
-            user_id: userId,
-            salary: 0,
-            categories: DEFAULT_CATEGORIES,
-          });
-
-        if (insertSettingsError) throw insertSettingsError;
-
-        setSalary(0);
-        setSalaryInput("");
-        setCategories(DEFAULT_CATEGORIES);
+    function refreshOnFocus() {
+      if (document.visibilityState === "visible") {
+        loadData(user.id, { silent: true });
       }
-
-      const { data: entriesData, error: entriesError } = await supabase
-        .from("finance_entries")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (entriesError) throw entriesError;
-
-      setEntries((entriesData || []).map(fromDbEntry));
-    } catch (err) {
-      console.error(err);
-      setSaveError("Erro ao carregar dados do Supabase.");
-    } finally {
-      setDataLoaded(true);
     }
-  }
+
+    document.addEventListener("visibilitychange", refreshOnFocus);
+    window.addEventListener("focus", refreshOnFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", refreshOnFocus);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [user, loadData]);
 
   async function handleAuth(e) {
     e.preventDefault();
     setAuthMsg("");
+
+    if (!supabase) {
+      setAuthMsg("Supabase não configurado.");
+      return;
+    }
 
     if (!authEmail || !authPassword) {
       setAuthMsg("Preencha e-mail e senha.");
@@ -195,14 +263,16 @@ export default function App() {
 
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email: authEmail,
           password: authPassword,
         });
 
         if (error) throw error;
 
-        setAuthMsg("Conta criada. Se o Supabase pedir confirmação, confirme no e-mail e depois entre.");
+        if (!data.session) {
+          setAuthMsg("Conta criada. Confirme no seu e-mail e depois entre.");
+        }
       }
     } catch (err) {
       console.error(err);
@@ -211,15 +281,18 @@ export default function App() {
   }
 
   async function logout() {
+    if (!supabase) return;
+
     await supabase.auth.signOut();
     setEntries([]);
     setSalary(0);
     setSalaryInput("");
     setCategories(DEFAULT_CATEGORIES);
+    setActiveTab("home");
   }
 
   async function saveSettings(nextSalary, nextCategories) {
-    if (!user) return;
+    if (!supabase || !user) return;
 
     try {
       setSyncing(true);
@@ -249,15 +322,18 @@ export default function App() {
   function commitSalary() {
     const v = parseMoney(salaryInput);
     setSalary(v);
+    setSalaryInput(v ? String(v).replace(".", ",") : "");
     saveSettings(v, categories);
   }
 
   async function addEntry() {
-    if (!user) return;
+    if (!supabase || !user) return;
 
     const v = parseMoney(form.value);
-
-    if (!v || v <= 0) return;
+    if (!v || v <= 0) {
+      setSaveError("Digite um valor válido para o lançamento.");
+      return;
+    }
 
     try {
       setSyncing(true);
@@ -279,12 +355,8 @@ export default function App() {
       if (error) throw error;
 
       setEntries((old) => [fromDbEntry(data), ...old]);
-
-      setForm((f) => ({
-        ...f,
-        value: "",
-        desc: "",
-      }));
+      setForm((f) => ({ ...f, value: "", desc: "" }));
+      setActiveTab("home");
     } catch (err) {
       console.error(err);
       setSaveError("Não consegui salvar esse gasto.");
@@ -294,7 +366,7 @@ export default function App() {
   }
 
   async function removeEntry(id) {
-    if (!user) return;
+    if (!supabase || !user) return;
 
     const oldEntries = entries;
     setEntries((old) => old.filter((e) => e.id !== id));
@@ -324,49 +396,38 @@ export default function App() {
       return;
     }
 
-    const id =
-      label.toLowerCase().replace(/\s+/g, "-") +
-      "-" +
-      Date.now().toString(36).slice(-3);
-
+    const id = makeCategoryId(label);
     const next = [...categories, { id, label, icon: "🏷️" }];
 
     setCategories(next);
-    setForm((f) => ({
-      ...f,
-      categoryId: id,
-    }));
-
+    setForm((f) => ({ ...f, categoryId: id }));
     setNewCatLabel("");
     setAddingCat(false);
 
     await saveSettings(salary, next);
   }
 
+  const [year, month] = monthCursor.split("-").map(Number);
+  const monthLabel = `${FULL_MONTHS[month - 1]} ${year}`;
+  const shortMonthLabel = `${MONTHS[month - 1]} ${year}`;
+
   const monthEntries = useMemo(() => {
     return entries.filter((e) => e.date.startsWith(monthCursor));
   }, [entries, monthCursor]);
 
-  const filteredEntries = useMemo(() => {
-    if (cardFilter) {
-      return monthEntries.filter((e) => e.cardId === cardFilter);
-    }
-
-    return monthEntries;
-  }, [monthEntries, cardFilter]);
-
-  const totalGasto = monthEntries.reduce((s, e) => s + e.value, 0);
+  const totalGasto = monthEntries.reduce((sum, entry) => sum + entry.value, 0);
   const saldo = salary - totalGasto;
+  const usedPercent = salary > 0 ? Math.min(100, Math.round((totalGasto / salary) * 100)) : 0;
+  const availablePercent = salary > 0 ? Math.max(0, Math.round((saldo / salary) * 100)) : 0;
 
   const perCard = useMemo(() => {
     const map = {};
-
-    CARDS.forEach((c) => {
-      map[c.id] = 0;
+    CARDS.forEach((card) => {
+      map[card.id] = 0;
     });
 
-    monthEntries.forEach((e) => {
-      map[e.cardId] = (map[e.cardId] || 0) + e.value;
+    monthEntries.forEach((entry) => {
+      map[entry.cardId] = (map[entry.cardId] || 0) + entry.value;
     });
 
     return map;
@@ -375,8 +436,8 @@ export default function App() {
   const perCategory = useMemo(() => {
     const map = {};
 
-    monthEntries.forEach((e) => {
-      map[e.categoryId] = (map[e.categoryId] || 0) + e.value;
+    monthEntries.forEach((entry) => {
+      map[entry.categoryId] = (map[entry.categoryId] || 0) + entry.value;
     });
 
     return Object.entries(map)
@@ -388,138 +449,475 @@ export default function App() {
       .sort((a, b) => b.val - a.val);
   }, [monthEntries, categories]);
 
+  const latestEntries = monthEntries.slice(0, 5);
+
+  const visibleEntries = useMemo(() => {
+    const q = listSearch.trim().toLowerCase();
+
+    return entries
+      .filter((entry) => (listFilterCard ? entry.cardId === listFilterCard : true))
+      .filter((entry) => {
+        if (!q) return true;
+        const category = categories.find((cat) => cat.id === entry.categoryId)?.label || "";
+        const card = CARDS.find((c) => c.id === entry.cardId)?.name || "";
+        return `${category} ${card} ${entry.desc} ${formatDateBR(entry.date)}`.toLowerCase().includes(q);
+      });
+  }, [entries, listFilterCard, listSearch, categories]);
+
   function shiftMonth(delta) {
     const [y, m] = monthCursor.split("-").map(Number);
     const d = new Date(y, m - 1 + delta, 1);
-
     setMonthCursor(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
 
-  const monthLabel = (() => {
-    const [y, m] = monthCursor.split("-").map(Number);
-    return `${MONTHS[m - 1]} ${y}`;
-  })();
+  function selectTab(tab) {
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
-  if (!supabaseUrl || !supabaseKey) {
+  function renderHeader() {
     return (
-      <div className="fd-root">
-        <style>{baseCss}</style>
-        <div className="fd-wrap">
-          <div className="fd-form">
-            <h2>Faltou configurar o Supabase</h2>
-            <p>Confira o arquivo .env e reinicie o Vite com npm run dev.</p>
-          </div>
+      <header className="app-header">
+        <div>
+          <div className="app-eyebrow">Controle financeiro</div>
+          <h1>Olá, Deyvid 👋</h1>
+          <p>{syncing ? "Salvando alterações..." : "Suas finanças sincronizadas em todos os dispositivos."}</p>
         </div>
-      </div>
-    );
-  }
 
-  if (!authLoaded) {
-    return (
-      <div className="loading">
-        <style>{baseCss}</style>
-        carregando…
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="fd-root">
-        <style>{baseCss}</style>
-
-        <div className="fd-wrap auth-wrap">
-          <div className="auth-card">
-            <div className="fd-title fd-display">Minhas Finanças</div>
-            <p className="auth-sub">
-              Entre na sua conta para sincronizar PC e iPhone.
-            </p>
-
-            <form onSubmit={handleAuth}>
-              <input
-                className="fd-input"
-                type="email"
-                placeholder="Seu e-mail"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-              />
-
-              <input
-                className="fd-input"
-                type="password"
-                placeholder="Senha"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-              />
-
-              <button className="fd-submit" type="submit">
-                {authMode === "login" ? "Entrar" : "Criar conta"}
-              </button>
-            </form>
-
-            <button
-              className="auth-switch"
-              onClick={() => {
-                setAuthMode(authMode === "login" ? "signup" : "login");
-                setAuthMsg("");
-              }}
-            >
-              {authMode === "login"
-                ? "Não tenho conta, quero criar"
-                : "Já tenho conta, quero entrar"}
-            </button>
-
-            {authMsg && <div className="fd-err">{authMsg}</div>}
+        <div className="header-actions">
+          <div className="month-switcher">
+            <button onClick={() => shiftMonth(-1)} aria-label="Mês anterior">‹</button>
+            <span>{monthLabel}</span>
+            <button onClick={() => shiftMonth(1)} aria-label="Próximo mês">›</button>
           </div>
+          <button className="icon-btn" onClick={() => loadData(user.id, { silent: true })} title="Atualizar">
+            ↻
+          </button>
         </div>
-      </div>
+      </header>
     );
   }
 
-  if (!dataLoaded) {
+  function renderSummary() {
     return (
-      <div className="loading">
-        <style>{baseCss}</style>
-        sincronizando…
-      </div>
-    );
-  }
-
-  return (
-    <div className="fd-root">
-      <style>{baseCss}</style>
-
-      <div className="fd-wrap">
-        <div className="fd-header">
+      <section className="summary-panel">
+        <div className="section-head">
           <div>
-            <div className="fd-title fd-display">Minhas Finanças</div>
-            <div className="fd-user">
-              {user.email} {syncing ? "· salvando..." : "· online"}
-            </div>
+            <h2>Resumo do mês</h2>
+            <p>Visão geral de {shortMonthLabel}</p>
           </div>
+          <button className="ghost-btn" onClick={() => setActiveTab("profile")}>✎ Editar salário</button>
+        </div>
 
-          <div className="fd-head-actions">
-            <div className="fd-month">
-              <button onClick={() => shiftMonth(-1)} aria-label="mês anterior">
-                ‹
-              </button>
-              <span>{monthLabel}</span>
-              <button onClick={() => shiftMonth(1)} aria-label="próximo mês">
-                ›
-              </button>
-            </div>
-
-            <button className="fd-logout" onClick={logout}>
-              sair
-            </button>
+        <div className="summary-grid">
+          <div className="summary-card purple">
+            <span>Salário</span>
+            <strong>{fmt(salary)}</strong>
+            <em>Carteira</em>
+          </div>
+          <div className="summary-card red">
+            <span>Gastos</span>
+            <strong>{fmt(totalGasto)}</strong>
+            <em>Saídas</em>
+          </div>
+          <div className="summary-card green">
+            <span>Saldo</span>
+            <strong>{fmt(saldo)}</strong>
+            <em>Disponível</em>
           </div>
         </div>
 
-        <div className="fd-summary">
-          <div className="fd-sumcard">
-            <div className="lbl">Salário</div>
+        <div className="balance-strip">
+          <div className="ring" style={{ "--pct": `${availablePercent}%` }}>
+            <span>{availablePercent}%</span>
+          </div>
+          <div>
+            <span>Saldo disponível</span>
+            <strong className={saldo >= 0 ? "positive" : "negative"}>{fmt(saldo)}</strong>
+            <p>{saldo >= 0 ? "Excelente! Continue assim 🚀" : "Atenção: gastos acima do salário."}</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderCardsOverview({ clickable = true } = {}) {
+    return (
+      <section className="bank-grid">
+        {CARDS.map((card) => (
+          <button
+            key={card.id}
+            className={`bank-card ${card.id} ${cardFilter === card.id ? "active" : ""}`}
+            onClick={() => clickable && setCardFilter(cardFilter === card.id ? null : card.id)}
+            type="button"
+          >
+            <span className="bank-icon" style={{ background: card.color, color: card.text }}>{card.icon}</span>
+            <span>{card.name}</span>
+            <strong>{fmt(perCard[card.id] || 0)}</strong>
+          </button>
+        ))}
+      </section>
+    );
+  }
+
+  function renderEntryForm({ title = "Novo lançamento", subtitle = "Registre uma nova despesa" } = {}) {
+    return (
+      <section className="form-panel">
+        <div className="section-head">
+          <div className="section-title-icon">▣</div>
+          <div>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
+          </div>
+        </div>
+
+        <div className="chips-row">
+          {categories.map((category) => (
+            <button
+              key={category.id}
+              className={`chip ${form.categoryId === category.id ? "sel" : ""}`}
+              onClick={() => setForm((old) => ({ ...old, categoryId: category.id }))}
+              type="button"
+            >
+              <span>{category.icon}</span> {category.label}
+            </button>
+          ))}
+
+          {!addingCat ? (
+            <button className="chip add" onClick={() => setAddingCat(true)} type="button">+ categoria</button>
+          ) : (
             <input
-              className="fd-salary-input"
+              className="chip-input"
+              autoFocus
+              placeholder="nova categoria"
+              value={newCatLabel}
+              onChange={(e) => setNewCatLabel(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addCategory()}
+              onBlur={addCategory}
+            />
+          )}
+        </div>
+
+        <div className="pills-row">
+          {CARDS.map((card) => (
+            <button
+              key={card.id}
+              className={`pill ${form.cardId === card.id ? "sel" : ""}`}
+              style={{ "--pill": card.color }}
+              onClick={() => setForm((old) => ({ ...old, cardId: card.id }))}
+              type="button"
+            >
+              {card.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="form-grid">
+          <label>
+            <span>Valor</span>
+            <input
+              className="app-input"
+              type="text"
+              inputMode="decimal"
+              placeholder="Ex: 25,90"
+              value={form.value}
+              onChange={(e) => setForm((old) => ({ ...old, value: e.target.value }))}
+            />
+          </label>
+
+          <label>
+            <span>Data</span>
+            <input
+              className="app-input"
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm((old) => ({ ...old, date: e.target.value }))}
+            />
+          </label>
+        </div>
+
+        <label>
+          <span>Descrição opcional</span>
+          <input
+            className="app-input"
+            type="text"
+            placeholder="Ex: almoço, uber, mercado..."
+            value={form.desc}
+            onChange={(e) => setForm((old) => ({ ...old, desc: e.target.value }))}
+            onKeyDown={(e) => e.key === "Enter" && addEntry()}
+          />
+        </label>
+
+        <button className="primary-btn" onClick={addEntry} disabled={syncing} type="button">
+          + {syncing ? "Salvando..." : "Registrar lançamento"}
+        </button>
+
+        {saveError && <div className="error-box">{saveError}</div>}
+      </section>
+    );
+  }
+
+  function renderTransactionItem(entry) {
+    const category = categories.find((cat) => cat.id === entry.categoryId);
+    const card = CARDS.find((c) => c.id === entry.cardId);
+
+    return (
+      <div className="transaction" key={entry.id}>
+        <div className="transaction-icon">{category?.icon || "🏷️"}</div>
+        <div className="transaction-main">
+          <strong>{category?.label || entry.categoryId}</strong>
+          <span>
+            <i style={{ background: card?.color || "#888" }} />
+            {card?.name || entry.cardId} {entry.desc ? `· ${entry.desc}` : ""} · {formatDateBR(entry.date)}
+          </span>
+        </div>
+        <div className="transaction-value">{fmt(entry.value)}</div>
+        <button className="delete-btn" onClick={() => removeEntry(entry.id)} type="button">×</button>
+      </div>
+    );
+  }
+
+  function renderLatest() {
+    return (
+      <section className="content-card">
+        <div className="section-head">
+          <div>
+            <h2>Últimas transações</h2>
+            <p>{latestEntries.length ? "Lançamentos recentes deste mês" : "Nenhuma transação lançada neste mês ainda."}</p>
+          </div>
+          <button className="text-btn" onClick={() => selectTab("transactions")}>Ver todas ›</button>
+        </div>
+
+        <div className="transactions-list">
+          {latestEntries.length === 0 ? (
+            <div className="empty-state">
+              <div>☷</div>
+              <strong>Nenhuma transação ainda</strong>
+              <span>Que tal registrar sua primeira despesa?</span>
+            </div>
+          ) : (
+            latestEntries.map(renderTransactionItem)
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderCategoryBreakdown({ compact = false } = {}) {
+    return (
+      <section className="content-card">
+        <div className="section-head">
+          <div>
+            <h2>Gastos por categoria</h2>
+            <p>{perCategory.length ? "Onde seu dinheiro foi neste mês" : "Os gastos por categoria aparecerão aqui."}</p>
+          </div>
+          <span className="mini-select">Este mês</span>
+        </div>
+
+        {perCategory.length === 0 ? (
+          <div className="empty-state small">
+            <div>◔</div>
+            <strong>Nenhum gasto registrado</strong>
+            <span>Os relatórios aparecem depois do primeiro lançamento.</span>
+          </div>
+        ) : (
+          <div className="breakdown-list">
+            {perCategory.slice(0, compact ? 4 : perCategory.length).map((row) => {
+              const pct = totalGasto ? Math.round((row.val / totalGasto) * 100) : 0;
+              return (
+                <div className="breakdown-row" key={row.id}>
+                  <div className="breakdown-top">
+                    <span>{row.cat ? `${row.cat.icon} ${row.cat.label}` : row.id}</span>
+                    <strong>{fmt(row.val)}</strong>
+                  </div>
+                  <div className="bar-bg">
+                    <div className="bar-fill" style={{ width: `${pct}%` }} />
+                  </div>
+                  <small>{pct}% dos gastos do mês</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  function renderHome() {
+    return (
+      <>
+        {renderHeader()}
+        {renderSummary()}
+        {renderCardsOverview()}
+        <div className="home-grid">
+          {renderEntryForm({ title: "Novo lançamento", subtitle: "Registre uma nova despesa rapidamente" })}
+          <div className="home-side">
+            {renderLatest()}
+            {renderCategoryBreakdown({ compact: true })}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  function renderTransactions() {
+    return (
+      <>
+        <section className="page-title-card">
+          <div>
+            <span>Lançamentos</span>
+            <h2>Histórico de gastos</h2>
+            <p>Consulte, filtre e apague seus lançamentos.</p>
+          </div>
+          <button className="primary-mini" onClick={() => selectTab("new")}>+ Novo</button>
+        </section>
+
+        <section className="filter-card">
+          <input
+            className="app-input"
+            type="text"
+            placeholder="Buscar por descrição, categoria ou cartão..."
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+          />
+
+          <div className="pills-row no-margin">
+            <button className={`pill neutral ${!listFilterCard ? "sel" : ""}`} onClick={() => setListFilterCard(null)} type="button">Todos</button>
+            {CARDS.map((card) => (
+              <button
+                key={card.id}
+                className={`pill ${listFilterCard === card.id ? "sel" : ""}`}
+                style={{ "--pill": card.color }}
+                onClick={() => setListFilterCard(listFilterCard === card.id ? null : card.id)}
+                type="button"
+              >
+                {card.name}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="content-card">
+          <div className="section-head">
+            <div>
+              <h2>Todos os lançamentos</h2>
+              <p>{visibleEntries.length} registro(s) encontrado(s)</p>
+            </div>
+          </div>
+
+          <div className="transactions-list">
+            {visibleEntries.length === 0 ? (
+              <div className="empty-state">
+                <div>☷</div>
+                <strong>Nenhum lançamento encontrado</strong>
+                <span>Tente mudar o filtro ou registre um novo gasto.</span>
+              </div>
+            ) : (
+              visibleEntries.map(renderTransactionItem)
+            )}
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderReports() {
+    return (
+      <>
+        <section className="page-title-card">
+          <div>
+            <span>Relatórios</span>
+            <h2>Análise do mês</h2>
+            <p>Resumo visual para entender seus gastos em {shortMonthLabel}.</p>
+          </div>
+        </section>
+
+        <section className="report-grid">
+          <div className="report-card big">
+            <span>Uso do salário</span>
+            <div className="large-ring" style={{ "--pct": `${usedPercent}%` }}>
+              <strong>{usedPercent}%</strong>
+            </div>
+            <p>{fmt(totalGasto)} gastos de {fmt(salary)} disponíveis</p>
+          </div>
+
+          <div className="report-card">
+            <span>Maior categoria</span>
+            <strong>{perCategory[0]?.cat?.label || "Sem dados"}</strong>
+            <p>{perCategory[0] ? fmt(perCategory[0].val) : "Lance um gasto para aparecer aqui."}</p>
+          </div>
+
+          <div className="report-card">
+            <span>Maior cartão</span>
+            <strong>
+              {CARDS.map((card) => ({ ...card, total: perCard[card.id] || 0 })).sort((a, b) => b.total - a.total)[0]?.name || "Sem dados"}
+            </strong>
+            <p>
+              {fmt(CARDS.map((card) => perCard[card.id] || 0).sort((a, b) => b - a)[0] || 0)}
+            </p>
+          </div>
+        </section>
+
+        {renderCategoryBreakdown()}
+
+        <section className="content-card">
+          <div className="section-head">
+            <div>
+              <h2>Gastos por cartão</h2>
+              <p>Comparativo dos meios de pagamento</p>
+            </div>
+          </div>
+          <div className="breakdown-list">
+            {CARDS.map((card) => {
+              const val = perCard[card.id] || 0;
+              const pct = totalGasto ? Math.round((val / totalGasto) * 100) : 0;
+              return (
+                <div className="breakdown-row" key={card.id}>
+                  <div className="breakdown-top">
+                    <span><i className="legend-dot" style={{ background: card.color }} /> {card.name}</span>
+                    <strong>{fmt(val)}</strong>
+                  </div>
+                  <div className="bar-bg">
+                    <div className="bar-fill" style={{ width: `${pct}%`, background: card.color }} />
+                  </div>
+                  <small>{pct}% dos gastos</small>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderProfile() {
+    return (
+      <>
+        <section className="page-title-card profile-head">
+          <div>
+            <span>Perfil</span>
+            <h2>Sua conta</h2>
+            <p>Gerencie sua sessão e configurações principais.</p>
+          </div>
+          <div className="avatar">{(user?.email || "D").slice(0, 1).toUpperCase()}</div>
+        </section>
+
+        <section className="content-card profile-card">
+          <div className="profile-row">
+            <span>E-mail conectado</span>
+            <strong>{user?.email}</strong>
+          </div>
+          <div className="profile-row">
+            <span>Status</span>
+            <strong className="online-dot">Online e sincronizado</strong>
+          </div>
+          <div className="profile-row input-row">
+            <div>
+              <span>Salário mensal</span>
+              <p>Esse valor entra no cálculo do saldo e relatórios.</p>
+            </div>
+            <input
+              className="app-input salary-profile"
               value={salaryInput}
               inputMode="decimal"
               placeholder="0,00"
@@ -527,691 +925,1139 @@ export default function App() {
               onBlur={commitSalary}
             />
           </div>
+          <button className="primary-btn" onClick={commitSalary}>Salvar salário</button>
+          <button className="danger-btn" onClick={logout}>Sair da conta</button>
+          {saveError && <div className="error-box">{saveError}</div>}
+        </section>
+      </>
+    );
+  }
 
-          <div className="fd-sumcard">
-            <div className="lbl">Gasto no mês</div>
-            <div className="val fd-mono">{fmt(totalGasto)}</div>
-          </div>
+  function renderActiveTab() {
+    if (activeTab === "transactions") return renderTransactions();
+    if (activeTab === "new") return renderEntryForm({ title: "Novo lançamento", subtitle: "Cadastre um gasto com categoria, cartão e descrição." });
+    if (activeTab === "reports") return renderReports();
+    if (activeTab === "profile") return renderProfile();
+    return renderHome();
+  }
 
-          <div className="fd-sumcard">
-            <div className="lbl">Saldo</div>
-            <div className={`val fd-mono ${saldo >= 0 ? "fd-saldo-pos" : "fd-saldo-neg"}`}>
-              {fmt(saldo)}
-            </div>
-          </div>
-        </div>
-
-        <div className="fd-cards-row">
-          <div
-            className={`fd-card ${cardFilter === null ? "active" : ""}`}
-            style={{
-              background: "#FFFFFF",
-              color: "#20241F",
-              border: cardFilter === null ? "2px solid #20241F" : "1px solid #DEDAD1",
-            }}
-            onClick={() => setCardFilter(null)}
-          >
-            <div className="cname">Todos</div>
-            <div className="cval">{fmt(totalGasto)}</div>
-          </div>
-
-          {CARDS.map((c) => (
-            <div
-              key={c.id}
-              className={`fd-card ${cardFilter === c.id ? "active" : ""}`}
-              style={{ background: c.color, color: c.text }}
-              onClick={() => setCardFilter(cardFilter === c.id ? null : c.id)}
-            >
-              <div className="cname">{c.name}</div>
-              <div className="cval">{fmt(perCard[c.id] || 0)}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="fd-section-title">Adicionar gasto</div>
-
-        <div className="fd-form">
-          <div className="fd-chips">
-            {categories.map((c) => (
-              <div
-                key={c.id}
-                className={`fd-chip ${form.categoryId === c.id ? "sel" : ""}`}
-                onClick={() => setForm((f) => ({ ...f, categoryId: c.id }))}
-              >
-                <span>{c.icon}</span> {c.label}
-              </div>
-            ))}
-
-            {!addingCat ? (
-              <div className="fd-chip add" onClick={() => setAddingCat(true)}>
-                + categoria
-              </div>
-            ) : (
-              <input
-                className="fd-cat-input"
-                autoFocus
-                placeholder="nome da categoria"
-                value={newCatLabel}
-                onChange={(e) => setNewCatLabel(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addCategory()}
-                onBlur={addCategory}
-              />
-            )}
-          </div>
-
-          <div className="fd-pills">
-            {CARDS.map((c) => (
-              <div
-                key={c.id}
-                className={`fd-pill ${form.cardId === c.id ? "sel" : ""}`}
-                style={{ background: c.color, color: c.text }}
-                onClick={() => setForm((f) => ({ ...f, cardId: c.id }))}
-              >
-                {c.name}
-              </div>
-            ))}
-          </div>
-
-          <div className="fd-row2">
-            <input
-              className="fd-input"
-              type="text"
-              inputMode="decimal"
-              placeholder="Valor (R$)"
-              value={form.value}
-              onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
-            />
-
-            <input
-              className="fd-input"
-              type="date"
-              value={form.date}
-              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-            />
-          </div>
-
-          <div className="fd-row3">
-            <input
-              className="fd-input"
-              type="text"
-              placeholder="Descrição (opcional)"
-              value={form.desc}
-              onChange={(e) => setForm((f) => ({ ...f, desc: e.target.value }))}
-              onKeyDown={(e) => e.key === "Enter" && addEntry()}
-            />
-          </div>
-
-          <button className="fd-submit" onClick={addEntry}>
-            Adicionar gasto
-          </button>
-
-          {saveError && <div className="fd-err">{saveError}</div>}
-        </div>
-
-        {perCategory.length > 0 && (
-          <>
-            <div className="fd-section-title">Por categoria</div>
-
-            <div className="fd-breakdown">
-              {perCategory.map((row) => (
-                <div className="fd-bd-row" key={row.id}>
-                  <div className="fd-bd-top">
-                    <span>{row.cat ? `${row.cat.icon} ${row.cat.label}` : row.id}</span>
-                    <span className="fd-mono">{fmt(row.val)}</span>
-                  </div>
-
-                  <div className="fd-bar-bg">
-                    <div
-                      className="fd-bar-fill"
-                      style={{
-                        width: `${totalGasto ? (row.val / totalGasto) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        <div className="fd-section-title">
-          Lançamentos {cardFilter ? `· ${CARDS.find((c) => c.id === cardFilter)?.name}` : ""}
-        </div>
-
-        <div className="fd-list">
-          {filteredEntries.length === 0 && (
-            <div className="fd-empty">Nenhum gasto lançado neste mês ainda.</div>
-          )}
-
-          {filteredEntries.map((e) => {
-            const cat = categories.find((c) => c.id === e.categoryId);
-            const card = CARDS.find((c) => c.id === e.cardId);
-
-            return (
-              <div className="fd-entry" key={e.id}>
-                <div className="icon">{cat?.icon || "🏷️"}</div>
-
-                <div className="mid">
-                  <div className="cat">{cat?.label || e.categoryId}</div>
-
-                  <div className="desc">
-                    <span className="dot" style={{ background: card?.color }} />
-                    {card?.name} {e.desc && `· ${e.desc}`} ·{" "}
-                    {e.date.split("-").reverse().join("/")}
-                  </div>
-                </div>
-
-                <div className="val">{fmt(e.value)}</div>
-
-                <button className="del" onClick={() => removeEntry(e.id)}>
-                  ✕
-                </button>
-              </div>
-            );
-          })}
+  if (!hasSupabaseConfig) {
+    return (
+      <div className="app-shell auth-only">
+        <style>{baseCss}</style>
+        <div className="auth-card">
+          <h1>Configuração incompleta</h1>
+          <p>Confira o arquivo .env e reinicie o Vite com npm run dev.</p>
         </div>
       </div>
+    );
+  }
+
+  if (!authLoaded) {
+    return (
+      <div className="app-shell auth-only">
+        <style>{baseCss}</style>
+        <div className="loading-card">Carregando...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="app-shell auth-only">
+        <style>{baseCss}</style>
+        <section className="auth-card">
+          <div className="auth-logo">◈</div>
+          <h1>Minhas Finanças</h1>
+          <p>Entre na sua conta para sincronizar PC e iPhone.</p>
+
+          <form onSubmit={handleAuth}>
+            <input
+              className="app-input"
+              type="email"
+              placeholder="Seu e-mail"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+            />
+            <input
+              className="app-input"
+              type="password"
+              placeholder="Senha"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+            />
+            <button className="primary-btn" type="submit">
+              {authMode === "login" ? "Entrar" : "Criar conta"}
+            </button>
+          </form>
+
+          <button
+            className="text-btn center"
+            onClick={() => {
+              setAuthMode(authMode === "login" ? "signup" : "login");
+              setAuthMsg("");
+            }}
+            type="button"
+          >
+            {authMode === "login" ? "Não tenho conta, quero criar" : "Já tenho conta, quero entrar"}
+          </button>
+
+          {authMsg && <div className="error-box">{authMsg}</div>}
+        </section>
+      </div>
+    );
+  }
+
+  if (!dataLoaded) {
+    return (
+      <div className="app-shell auth-only">
+        <style>{baseCss}</style>
+        <div className="loading-card">Sincronizando dados...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <style>{baseCss}</style>
+
+      <main className="app-main">
+        {renderActiveTab()}
+      </main>
+
+      <nav className="app-nav" aria-label="Navegação principal">
+        <button className={activeTab === "home" ? "active" : ""} onClick={() => selectTab("home")} type="button">
+          <span>⌂</span> Início
+        </button>
+        <button className={activeTab === "transactions" ? "active" : ""} onClick={() => selectTab("transactions")} type="button">
+          <span>☷</span> Lançamentos
+        </button>
+        <button className={`nav-new ${activeTab === "new" ? "active" : ""}`} onClick={() => selectTab("new")} type="button">
+          <span>＋</span> Novo
+        </button>
+        <button className={activeTab === "reports" ? "active" : ""} onClick={() => selectTab("reports")} type="button">
+          <span>▥</span> Relatórios
+        </button>
+        <button className={activeTab === "profile" ? "active" : ""} onClick={() => selectTab("profile")} type="button">
+          <span>○</span> Perfil
+        </button>
+      </nav>
     </div>
   );
 }
 
 const baseCss = `
-  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
-
-  html,
-  body,
-  #root {
-    margin: 0;
-    width: 100%;
-    min-height: 100%;
+  :root {
+    --bg: #070b14;
+    --bg2: #101522;
+    --panel: rgba(17, 23, 37, 0.82);
+    --panel2: rgba(28, 33, 48, 0.72);
+    --line: rgba(255, 255, 255, 0.08);
+    --line2: rgba(255, 255, 255, 0.14);
+    --text: #f5f7fb;
+    --muted: #a8b0c2;
+    --muted2: #687084;
+    --purple: #8b5cf6;
+    --purple2: #6d28d9;
+    --green: #22c55e;
+    --red: #f43f5e;
+    --yellow: #fbbf24;
+    --shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
+    color-scheme: dark;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
   * {
     box-sizing: border-box;
   }
 
-  body {
+  html, body, #root {
     margin: 0;
-    background: #F0EEE9;
+    min-height: 100%;
   }
 
-  .loading {
+  body {
+    background:
+      radial-gradient(circle at 15% 0%, rgba(139, 92, 246, 0.20), transparent 28%),
+      radial-gradient(circle at 85% 10%, rgba(34, 197, 94, 0.10), transparent 25%),
+      linear-gradient(145deg, #070b14 0%, #0b101b 50%, #05070d 100%);
+    color: var(--text);
+  }
+
+  button, input {
+    font: inherit;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .app-shell {
     min-height: 100vh;
+    padding: 28px 20px 112px;
+    position: relative;
+  }
+
+  .app-shell::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: linear-gradient(to bottom, rgba(0,0,0,0.85), rgba(0,0,0,0));
+  }
+
+  .app-main {
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .auth-only {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #F0EEE9;
-    color: #20241F;
-    font-family: Inter, sans-serif;
+    padding-bottom: 28px;
   }
 
-  .fd-root {
-    min-height: 100vh;
-    background: #F0EEE9;
-    color: #20241F;
-    font-family: 'Inter', sans-serif;
-    padding: 20px 16px 60px;
+  .loading-card,
+  .auth-card,
+  .summary-panel,
+  .form-panel,
+  .content-card,
+  .page-title-card,
+  .filter-card,
+  .report-card {
+    background: linear-gradient(145deg, rgba(22, 29, 47, 0.86), rgba(13, 18, 31, 0.78));
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
   }
 
-  .fd-wrap {
-    max-width: 980px;
-    margin: 0 auto;
-  }
-
-  .fd-mono {
-    font-family: 'IBM Plex Mono', monospace;
-    font-weight: 600;
-  }
-
-  .fd-display {
-    font-family: 'Space Grotesk', sans-serif;
+  .loading-card {
+    border-radius: 24px;
+    padding: 24px 28px;
+    color: var(--muted);
     font-weight: 700;
   }
 
-  .fd-header {
+  .auth-card {
+    width: min(420px, 100%);
+    border-radius: 30px;
+    padding: 28px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 18px;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .fd-title {
-    font-size: 24px;
-    letter-spacing: -0.02em;
-  }
-
-  .fd-user {
-    font-size: 12px;
-    color: #6B6F68;
-    margin-top: 4px;
-  }
-
-  .fd-head-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .fd-month {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #FFFFFF;
-    border: 1px solid #DEDAD1;
-    border-radius: 999px;
-    padding: 6px 14px;
-  }
-
-  .fd-month button {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 20px;
-    color: #20241F;
-    padding: 2px 6px;
-    line-height: 1;
-  }
-
-  .fd-month span {
-    font-size: 13px;
-    min-width: 70px;
+    flex-direction: column;
+    gap: 16px;
     text-align: center;
   }
 
-  .fd-logout {
-    border: 1px solid #DEDAD1;
-    background: #fff;
-    color: #20241F;
-    border-radius: 999px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .fd-summary {
+  .auth-logo {
+    width: 58px;
+    height: 58px;
+    margin: 0 auto 4px;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
+    place-items: center;
+    border-radius: 20px;
+    background: linear-gradient(135deg, var(--purple), var(--green));
+    box-shadow: 0 18px 44px rgba(139, 92, 246, 0.28);
+    font-size: 28px;
   }
 
-  .fd-sumcard {
-    background: #FFFFFF;
-    border: 1px solid #DEDAD1;
-    border-radius: 14px;
-    padding: 14px 16px;
+  .auth-card h1,
+  .app-header h1,
+  .section-head h2,
+  .page-title-card h2 {
+    margin: 0;
+    letter-spacing: -0.04em;
   }
 
-  .fd-sumcard .lbl {
-    font-size: 11px;
-    color: #6B6F68;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
+  .auth-card p,
+  .app-header p,
+  .section-head p,
+  .page-title-card p,
+  .report-card p,
+  .profile-row p {
+    margin: 4px 0 0;
+    color: var(--muted);
   }
 
-  .fd-sumcard .val {
-    font-size: 20px;
-  }
-
-  .fd-salary-input {
-    border: none;
-    outline: none;
-    background: transparent;
-    font-family: 'IBM Plex Mono', monospace;
-    font-weight: 600;
-    font-size: 20px;
-    width: 100%;
-    color: #20241F;
-  }
-
-  .fd-saldo-pos {
-    color: #2F6B4F;
-  }
-
-  .fd-saldo-neg {
-    color: #B23B2E;
-  }
-
-  .fd-cards-row {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 10px;
-    margin-bottom: 22px;
-  }
-
-  .fd-card {
-    border-radius: 14px;
-    padding: 14px;
-    cursor: pointer;
-    position: relative;
-    border: 2px solid transparent;
-    transition: transform .12s ease;
-    min-height: 84px;
+  .auth-card form {
     display: flex;
     flex-direction: column;
+    gap: 10px;
+  }
+
+  .app-header {
+    display: flex;
     justify-content: space-between;
+    align-items: flex-start;
+    gap: 18px;
   }
 
-  .fd-card:active {
-    transform: scale(0.98);
-  }
-
-  .fd-card.active {
-    border-color: #20241F;
-  }
-
-  .fd-card .cname {
+  .app-eyebrow,
+  .page-title-card span:first-child {
+    color: var(--purple);
     font-size: 12px;
-    opacity: 0.85;
-    font-weight: 600;
-  }
-
-  .fd-card .cval {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  .fd-section-title {
-    font-size: 13px;
+    font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #6B6F68;
-    margin: 22px 0 10px;
+    letter-spacing: 0.12em;
   }
 
-  .fd-form {
-    background: #FFFFFF;
-    border: 1px solid #DEDAD1;
-    border-radius: 14px;
-    padding: 14px;
-    margin-bottom: 22px;
+  .app-header h1 {
+    font-size: clamp(30px, 5vw, 48px);
   }
 
-  .fd-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .fd-chip {
-    border: 1px solid #DEDAD1;
-    background: #F7F6F3;
-    border-radius: 999px;
-    padding: 8px 12px;
-    font-size: 13px;
-    cursor: pointer;
+  .header-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
-    user-select: none;
-  }
-
-  .fd-chip.sel {
-    background: #20241F;
-    color: #fff;
-    border-color: #20241F;
-  }
-
-  .fd-chip.add {
-    border-style: dashed;
-  }
-
-  .fd-cat-input {
-    border: 1px solid #DEDAD1;
-    border-radius: 999px;
-    padding: 8px 12px;
-    font-size: 13px;
-    outline: none;
-  }
-
-  .fd-pills {
-    display: flex;
+    gap: 10px;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
+    justify-content: flex-end;
   }
 
-  .fd-pill {
-    border-radius: 999px;
-    padding: 8px 12px;
-    font-size: 12px;
+  .month-switcher,
+  .app-nav,
+  .bank-card,
+  .chip,
+  .pill,
+  .ghost-btn,
+  .icon-btn,
+  .mini-select,
+  .primary-mini {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 18px;
+  }
+
+  .month-switcher {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .month-switcher button {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
     cursor: pointer;
-    font-weight: 600;
-    border: 2px solid transparent;
-    user-select: none;
+    font-size: 20px;
   }
 
-  .fd-pill.sel {
-    border-color: #20241F;
+  .month-switcher span {
+    min-width: 142px;
+    text-align: center;
+    font-weight: 800;
+    color: #dfe4ef;
   }
 
-  .fd-row2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-
-  .fd-row3 {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .fd-input {
-    border: 1px solid #DEDAD1;
-    border-radius: 10px;
-    padding: 12px;
-    font-size: 16px;
-    font-family: inherit;
-    outline: none;
-    width: 100%;
-    background: #fff;
-    color: #20241F;
-    margin-bottom: 10px;
-  }
-
-  .fd-input:focus {
-    border-color: #20241F;
-  }
-
-  .fd-submit {
-    width: 100%;
-    background: #20241F;
-    color: #fff;
-    border: none;
-    border-radius: 10px;
-    padding: 13px;
-    font-size: 15px;
-    font-weight: 600;
+  .icon-btn {
+    width: 46px;
+    height: 46px;
     cursor: pointer;
+    font-size: 20px;
   }
 
-  .fd-submit:active {
-    opacity: 0.85;
-  }
-
-  .fd-list {
+  .summary-panel {
+    border-radius: 30px;
+    padding: 24px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-bottom: 22px;
+    gap: 18px;
   }
 
-  .fd-entry {
-    background: #FFFFFF;
-    border: 1px solid #DEDAD1;
-    border-radius: 12px;
-    padding: 10px 12px;
+  .section-head {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 10px;
+    gap: 14px;
   }
 
-  .fd-entry .icon {
-    font-size: 18px;
+  .section-head h2 {
+    font-size: 22px;
   }
 
-  .fd-entry .mid {
-    flex: 1;
-    min-width: 0;
+  .ghost-btn,
+  .text-btn,
+  .primary-mini {
+    cursor: pointer;
   }
 
-  .fd-entry .cat {
-    font-size: 13px;
-    font-weight: 600;
+  .ghost-btn {
+    padding: 11px 14px;
+    font-weight: 800;
   }
 
-  .fd-entry .desc {
-    font-size: 12px;
-    color: #6B6F68;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .text-btn {
+    border: 0;
+    background: transparent;
+    color: #c084fc;
+    font-weight: 900;
     white-space: nowrap;
   }
 
-  .fd-entry .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    display: inline-block;
-    margin-right: 5px;
+  .text-btn.center {
+    align-self: center;
   }
 
-  .fd-entry .val {
-    font-family: 'IBM Plex Mono', monospace;
-    font-weight: 600;
-    font-size: 14px;
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
   }
 
-  .fd-entry .del {
-    border: none;
-    background: transparent;
-    color: #B23B2E;
-    cursor: pointer;
-    font-size: 13px;
-    padding: 4px 6px;
-  }
-
-  .fd-empty {
-    color: #6B6F68;
-    font-size: 13px;
+  .summary-card {
+    min-height: 132px;
+    border-radius: 24px;
     padding: 20px;
-    text-align: center;
-  }
-
-  .fd-breakdown {
-    background: #FFFFFF;
-    border: 1px solid #DEDAD1;
-    border-radius: 14px;
-    padding: 14px;
-    margin-bottom: 22px;
-  }
-
-  .fd-bd-row {
-    margin-bottom: 10px;
-  }
-
-  .fd-bd-top {
-    display: flex;
-    justify-content: space-between;
-    font-size: 13px;
-    margin-bottom: 4px;
-    gap: 10px;
-  }
-
-  .fd-bar-bg {
-    background: #F0EEE9;
-    border-radius: 999px;
-    height: 6px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.045);
+    position: relative;
     overflow: hidden;
   }
 
-  .fd-bar-fill {
-    background: #20241F;
-    height: 100%;
-    border-radius: 999px;
+  .summary-card::after {
+    content: attr(data-icon);
+    position: absolute;
+    right: 18px;
+    bottom: 16px;
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    opacity: 0.28;
   }
 
-  .fd-err {
-    color: #B23B2E;
-    font-size: 12px;
-    margin-top: 10px;
+  .summary-card span,
+  .report-card span,
+  .profile-row span {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
 
-  .auth-wrap {
-    max-width: 420px;
-    min-height: 90vh;
+  .summary-card strong {
+    display: block;
+    margin-top: 8px;
+    font-size: clamp(22px, 4vw, 32px);
+    letter-spacing: -0.05em;
+  }
+
+  .summary-card em {
+    position: absolute;
+    right: 18px;
+    bottom: 16px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.25);
+    font-style: normal;
+    font-weight: 900;
+  }
+
+  .summary-card.purple strong { color: #a78bfa; }
+  .summary-card.red strong { color: var(--red); }
+  .summary-card.green strong { color: var(--green); }
+
+  .balance-strip {
+    border-radius: 24px;
+    padding: 18px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--line);
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 22px;
   }
 
-  .auth-card {
-    width: 100%;
-    background: #fff;
-    border: 1px solid #DEDAD1;
-    border-radius: 18px;
+  .ring,
+  .large-ring {
+    --pct: 0%;
+    border-radius: 999px;
+    background: conic-gradient(var(--green) var(--pct), rgba(255,255,255,0.08) 0);
+    display: grid;
+    place-items: center;
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .ring {
+    width: 96px;
+    height: 96px;
+  }
+
+  .ring::before,
+  .large-ring::before {
+    content: "";
+    position: absolute;
+    inset: 10px;
+    background: #101725;
+    border-radius: inherit;
+  }
+
+  .ring span,
+  .large-ring strong {
+    position: relative;
+    z-index: 1;
+    font-weight: 1000;
+    font-size: 22px;
+  }
+
+  .balance-strip div:last-child span {
+    color: var(--muted);
+    font-weight: 800;
+  }
+
+  .balance-strip div:last-child strong {
+    display: block;
+    margin: 6px 0 2px;
+    font-size: clamp(28px, 6vw, 44px);
+    letter-spacing: -0.06em;
+  }
+
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+
+  .bank-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .bank-card {
+    padding: 18px;
+    min-height: 110px;
+    text-align: left;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 12px;
+    row-gap: 6px;
+    align-items: center;
+    transition: 0.2s ease;
+  }
+
+  .bank-card:hover,
+  .bank-card.active {
+    transform: translateY(-3px);
+    border-color: var(--line2);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.28);
+  }
+
+  .bank-icon {
+    grid-row: 1 / span 2;
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    font-weight: 1000;
+  }
+
+  .bank-card span:nth-child(2) {
+    font-weight: 900;
+  }
+
+  .bank-card strong {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .home-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.18fr) minmax(340px, 0.82fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .home-side {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .form-panel,
+  .content-card,
+  .page-title-card,
+  .filter-card {
+    border-radius: 30px;
     padding: 22px;
   }
 
-  .auth-sub {
-    color: #6B6F68;
-    font-size: 14px;
-    margin-bottom: 18px;
+  .form-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  .auth-switch {
-    width: 100%;
-    border: none;
-    background: transparent;
-    color: #20241F;
+  .section-title-icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    display: grid;
+    place-items: center;
+    background: rgba(139, 92, 246, 0.18);
+    color: #c4b5fd;
+    font-size: 28px;
+    flex: 0 0 auto;
+  }
+
+  .chips-row,
+  .pills-row {
+    display: flex;
+    gap: 9px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .chips-row::-webkit-scrollbar,
+  .pills-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .chip,
+  .pill {
+    white-space: nowrap;
+    padding: 10px 13px;
     cursor: pointer;
-    margin-top: 12px;
     font-size: 13px;
-    text-decoration: underline;
+    font-weight: 800;
   }
 
-  @media (max-width: 640px) {
-    .fd-root {
-      padding: 18px 12px 60px;
-    }
+  .chip.sel,
+  .pill.sel {
+    background: rgba(139, 92, 246, 0.18);
+    border-color: rgba(167, 139, 250, 0.45);
+    color: #f5f3ff;
+  }
 
-    .fd-title {
-      font-size: 22px;
-    }
+  .pill.sel {
+    box-shadow: inset 0 -2px 0 var(--pill);
+  }
 
-    .fd-summary {
+  .chip.add {
+    border-style: dashed;
+    color: #c4b5fd;
+  }
+
+  .chip-input,
+  .app-input {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 16px;
+    outline: none;
+  }
+
+  .chip-input {
+    min-width: 160px;
+    padding: 10px 13px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  label span {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+    margin-bottom: 7px;
+  }
+
+  .app-input {
+    width: 100%;
+    padding: 15px 16px;
+    font-size: 16px;
+  }
+
+  .app-input:focus,
+  .chip-input:focus {
+    border-color: rgba(167, 139, 250, 0.55);
+    box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.10);
+  }
+
+  .primary-btn,
+  .danger-btn,
+  .primary-mini {
+    border: 0;
+    cursor: pointer;
+    font-weight: 1000;
+  }
+
+  .primary-btn {
+    width: 100%;
+    padding: 16px 18px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #7c3aed, #6d28d9 58%, #4f46e5);
+    color: #fff;
+    box-shadow: 0 16px 40px rgba(124, 58, 237, 0.28);
+  }
+
+  .primary-btn:disabled {
+    opacity: 0.65;
+    cursor: wait;
+  }
+
+  .danger-btn {
+    width: 100%;
+    padding: 15px 18px;
+    border-radius: 18px;
+    background: rgba(244, 63, 94, 0.12);
+    color: #fecdd3;
+    border: 1px solid rgba(244, 63, 94, 0.22);
+  }
+
+  .error-box {
+    padding: 13px 14px;
+    border-radius: 16px;
+    background: rgba(244, 63, 94, 0.12);
+    border: 1px solid rgba(244, 63, 94, 0.22);
+    color: #fecdd3;
+    font-size: 14px;
+    font-weight: 700;
+  }
+
+  .transactions-list,
+  .breakdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .transaction {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto 38px;
+    align-items: center;
+    gap: 12px;
+    padding: 13px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--line);
+  }
+
+  .transaction-icon {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.06);
+    font-size: 20px;
+  }
+
+  .transaction-main {
+    min-width: 0;
+  }
+
+  .transaction-main strong {
+    display: block;
+  }
+
+  .transaction-main span {
+    color: var(--muted);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    margin-top: 3px;
+  }
+
+  .transaction-main i,
+  .legend-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+  }
+
+  .transaction-value {
+    font-weight: 1000;
+    white-space: nowrap;
+  }
+
+  .delete-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 13px;
+    border: 1px solid rgba(244, 63, 94, 0.20);
+    background: rgba(244, 63, 94, 0.10);
+    color: #fb7185;
+    cursor: pointer;
+    font-size: 20px;
+  }
+
+  .empty-state {
+    min-height: 142px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 20px;
+    color: var(--muted);
+    border-radius: 22px;
+    background: rgba(0,0,0,0.18);
+    border: 1px dashed var(--line);
+  }
+
+  .empty-state div {
+    width: 54px;
+    height: 54px;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    background: rgba(139, 92, 246, 0.14);
+    color: #c4b5fd;
+    font-size: 26px;
+  }
+
+  .empty-state strong {
+    color: var(--text);
+  }
+
+  .empty-state.small {
+    min-height: 120px;
+  }
+
+  .breakdown-row {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+  }
+
+  .breakdown-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .bar-bg {
+    height: 9px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #8b5cf6, #22c55e);
+  }
+
+  .breakdown-row small {
+    color: var(--muted2);
+    font-weight: 800;
+  }
+
+  .mini-select {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 9px 12px;
+  }
+
+  .page-title-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .page-title-card h2 {
+    font-size: clamp(26px, 4vw, 38px);
+  }
+
+  .primary-mini {
+    padding: 12px 16px;
+    background: rgba(139, 92, 246, 0.18);
+    color: #ddd6fe;
+  }
+
+  .filter-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .no-margin {
+    margin: 0;
+  }
+
+  .pill.neutral.sel {
+    box-shadow: none;
+  }
+
+  .report-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.95fr 0.95fr;
+    gap: 16px;
+  }
+
+  .report-card {
+    border-radius: 30px;
+    padding: 22px;
+    min-height: 190px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .report-card strong {
+    font-size: 26px;
+    letter-spacing: -0.04em;
+  }
+
+  .large-ring {
+    width: 132px;
+    height: 132px;
+    margin: 8px auto;
+  }
+
+  .profile-head {
+    align-items: center;
+  }
+
+  .avatar {
+    width: 76px;
+    height: 76px;
+    border-radius: 28px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, var(--purple), var(--green));
+    font-size: 32px;
+    font-weight: 1000;
+  }
+
+  .profile-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .profile-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid var(--line);
+  }
+
+  .profile-row strong {
+    text-align: right;
+  }
+
+  .online-dot::before {
+    content: "";
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 8px;
+    border-radius: 999px;
+    background: var(--green);
+    box-shadow: 0 0 12px var(--green);
+  }
+
+  .input-row {
+    align-items: flex-start;
+  }
+
+  .salary-profile {
+    max-width: 240px;
+  }
+
+  .app-nav {
+    position: fixed;
+    z-index: 10;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    width: min(760px, calc(100% - 28px));
+    padding: 10px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.46);
+  }
+
+  .app-nav button {
+    border: 0;
+    border-radius: 18px;
+    color: var(--muted);
+    background: transparent;
+    padding: 10px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .app-nav button span {
+    font-size: 22px;
+  }
+
+  .app-nav button.active {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.14);
+  }
+
+  .app-nav .nav-new {
+    color: #fff;
+  }
+
+  .app-nav .nav-new span {
+    width: 48px;
+    height: 48px;
+    margin-top: -24px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+    box-shadow: 0 14px 34px rgba(139, 92, 246, 0.36);
+  }
+
+  @media (max-width: 980px) {
+    .home-grid,
+    .report-grid {
       grid-template-columns: 1fr;
     }
 
-    .fd-cards-row {
-      grid-template-columns: repeat(2, 1fr);
+    .bank-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px) {
+    .app-shell {
+      padding: 22px 14px 112px;
     }
 
-    .fd-card {
-      min-height: 78px;
+    .app-header {
+      flex-direction: column;
     }
 
-    .fd-row2,
-    .fd-row3 {
+    .header-actions {
+      width: 100%;
+      justify-content: space-between;
+    }
+
+    .month-switcher {
+      flex: 1;
+      justify-content: space-between;
+    }
+
+    .summary-grid,
+    .form-grid {
       grid-template-columns: 1fr;
     }
 
-    .fd-entry {
+    .summary-panel,
+    .form-panel,
+    .content-card,
+    .page-title-card,
+    .filter-card {
+      border-radius: 24px;
+      padding: 18px;
+    }
+
+    .section-head {
       align-items: flex-start;
     }
 
-    .fd-entry .val {
-      font-size: 13px;
+    .balance-strip {
+      align-items: flex-start;
+    }
+
+    .transaction {
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+    }
+
+    .transaction-icon {
+      width: 44px;
+      height: 44px;
+    }
+
+    .delete-btn {
+      grid-column: 3;
+      grid-row: 2;
+      justify-self: end;
+      width: 34px;
+      height: 34px;
+    }
+
+    .transaction-value {
+      align-self: start;
+    }
+
+    .profile-row,
+    .input-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .profile-row strong {
+      text-align: left;
+    }
+
+    .salary-profile {
+      max-width: none;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .app-shell {
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+
+    .bank-grid {
+      gap: 10px;
+    }
+
+    .bank-card {
+      grid-template-columns: 1fr;
+      min-height: 126px;
+    }
+
+    .bank-icon {
+      grid-row: auto;
+    }
+
+    .app-nav {
+      width: calc(100% - 14px);
+      bottom: 10px;
+      gap: 2px;
+    }
+
+    .app-nav button {
+      font-size: 10px;
+      padding: 8px 3px;
     }
   }
 `;
