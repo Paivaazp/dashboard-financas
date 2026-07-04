@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -7,10 +7,11 @@ const hasSupabaseConfig = Boolean(supabaseUrl && supabaseKey);
 const supabase = hasSupabaseConfig ? createClient(supabaseUrl, supabaseKey) : null;
 
 const CARDS = [
-  { id: "nubank", name: "Nubank", short: "Nu", color: "#8A05BE", text: "#FFFFFF", icon: "◫" },
-  { id: "picpay", name: "PicPay", short: "Pi", color: "#21C25E", text: "#071D12", icon: "◩" },
-  { id: "santander", name: "Santander", short: "St", color: "#EC0000", text: "#FFFFFF", icon: "◭" },
-  { id: "dinheiro", name: "Pix", short: "R$", color: "#313743", text: "#FFFFFF", icon: "◉" },
+  { id: "nubank", name: "Nubank", short: "Nu", color: "#8A05BE", text: "#FFFFFF", icon: "◫", affectsSalary: true },
+  { id: "picpay", name: "PicPay", short: "Pi", color: "#21C25E", text: "#071D12", icon: "◩", affectsSalary: true },
+  { id: "santander", name: "Santander", short: "St", color: "#EC0000", text: "#FFFFFF", icon: "◭", affectsSalary: true },
+  { id: "dinheiro", name: "Pix", short: "R$", color: "#313743", text: "#FFFFFF", icon: "◉", affectsSalary: true },
+  { id: "credito", name: "Crédito", short: "Cr", color: "#F59E0B", text: "#1C1200", icon: "◇", affectsSalary: false },
 ];
 
 const DEFAULT_CATEGORIES = [
@@ -83,6 +84,11 @@ function fromDbEntry(row) {
   };
 }
 
+function countsAgainstSalary(cardId) {
+  const card = CARDS.find((item) => item.id === cardId);
+  return card?.affectsSalary !== false;
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [authLoaded, setAuthLoaded] = useState(false);
@@ -120,6 +126,8 @@ export default function App() {
   const [saveError, setSaveError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [profileImage, setProfileImage] = useState("");
+  const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
+  const categoryScrollerRef = useRef(null);
 
   const user = session?.user || null;
 
@@ -447,6 +455,54 @@ export default function App() {
     setForm((f) => ({ ...f, categoryId: id }));
     setNewCatLabel("");
     setAddingCat(false);
+    setCategoryManagerOpen(true);
+
+    await saveSettings(salary, next);
+  }
+
+  function scrollCategoryRow(direction) {
+    const el = categoryScrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * Math.min(360, Math.max(220, el.clientWidth * 0.75)), behavior: "smooth" });
+  }
+
+  function handleCategoryWheel(event) {
+    const el = categoryScrollerRef.current;
+    if (!el) return;
+    const canScroll = el.scrollWidth > el.clientWidth;
+    if (!canScroll || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    el.scrollLeft += event.deltaY;
+  }
+
+  async function removeCategory(categoryId) {
+    const category = categories.find((item) => item.id === categoryId);
+    if (!category) return;
+
+    const isDefault = DEFAULT_CATEGORIES.some((item) => item.id === categoryId);
+    if (isDefault) {
+      setSaveError("Categorias padrão não podem ser excluídas.");
+      return;
+    }
+
+    const hasEntries = entries.some((entry) => entry.categoryId === categoryId);
+    if (hasEntries) {
+      setSaveError("Essa categoria tem lançamentos. Apague esses lançamentos antes de excluir a categoria.");
+      return;
+    }
+
+    const confirmed = window.confirm(`Excluir a categoria "${category.label}"?`);
+    if (!confirmed) return;
+
+    const next = categories.filter((item) => item.id !== categoryId);
+    const fallbackCategory = next[0]?.id || DEFAULT_CATEGORIES[0].id;
+
+    setCategories(next);
+    setForm((old) => ({
+      ...old,
+      categoryId: old.categoryId === categoryId ? fallbackCategory : old.categoryId,
+    }));
+    setSaveError("");
 
     await saveSettings(salary, next);
   }
@@ -459,7 +515,17 @@ export default function App() {
     return entries.filter((e) => e.date.startsWith(monthCursor));
   }, [entries, monthCursor]);
 
-  const totalGasto = monthEntries.reduce((sum, entry) => sum + entry.value, 0);
+  const salaryEntries = useMemo(() => {
+    return monthEntries.filter((entry) => countsAgainstSalary(entry.cardId));
+  }, [monthEntries]);
+
+  const creditEntries = useMemo(() => {
+    return monthEntries.filter((entry) => !countsAgainstSalary(entry.cardId));
+  }, [monthEntries]);
+
+  const totalGasto = salaryEntries.reduce((sum, entry) => sum + entry.value, 0);
+  const totalCredito = creditEntries.reduce((sum, entry) => sum + entry.value, 0);
+  const totalMovimentado = monthEntries.reduce((sum, entry) => sum + entry.value, 0);
   const saldo = salary - totalGasto;
   const usedPercent = salary > 0 ? Math.min(100, Math.round((totalGasto / salary) * 100)) : 0;
   const availablePercent = salary > 0 ? Math.max(0, Math.round((saldo / salary) * 100)) : 0;
@@ -560,9 +626,9 @@ export default function App() {
             <em>Carteira</em>
           </div>
           <div className="summary-card red">
-            <span>Gastos</span>
+            <span>Gastos atuais</span>
             <strong>{fmt(totalGasto)}</strong>
-            <em>Saídas</em>
+            <em>Saídas do salário</em>
           </div>
           <div className="summary-card green">
             <span>Saldo</span>
@@ -579,6 +645,9 @@ export default function App() {
             <span>Saldo disponível</span>
             <strong className={saldo >= 0 ? "positive" : "negative"}>{fmt(saldo)}</strong>
             <p>{saldo >= 0 ? "Excelente! Continue assim 🚀" : "Atenção: gastos acima do salário."}</p>
+            {totalCredito > 0 && (
+              <p className="credit-note">Crédito no mês: {fmt(totalCredito)} · não desconta do saldo atual.</p>
+            )}
           </div>
         </div>
       </section>
@@ -615,34 +684,70 @@ export default function App() {
           </div>
         </div>
 
-        <div className="chips-row">
-          {categories.map((category) => (
-            <button
-              key={category.id}
-              className={`chip ${form.categoryId === category.id ? "sel" : ""}`}
-              onClick={() => setForm((old) => ({ ...old, categoryId: category.id }))}
-              type="button"
-            >
-              <span>{category.icon}</span> {category.label}
-            </button>
-          ))}
+        <div className="category-tools">
+          <button className="carousel-btn" onClick={() => scrollCategoryRow(-1)} type="button" aria-label="Categorias anteriores">‹</button>
 
-          {!addingCat ? (
-            <button className="chip add" onClick={() => setAddingCat(true)} type="button">+ categoria</button>
-          ) : (
-            <input
-              className="chip-input"
-              autoFocus
-              placeholder="nova categoria"
-              value={newCatLabel}
-              onChange={(e) => setNewCatLabel(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addCategory()}
-              onBlur={addCategory}
-            />
-          )}
+          <div className="chips-row" ref={categoryScrollerRef} onWheel={handleCategoryWheel}>
+            {categories.map((category) => (
+              <button
+                key={category.id}
+                className={`chip ${form.categoryId === category.id ? "sel" : ""}`}
+                onClick={() => setForm((old) => ({ ...old, categoryId: category.id }))}
+                type="button"
+              >
+                <span>{category.icon}</span> {category.label}
+              </button>
+            ))}
+
+            {!addingCat ? (
+              <button className="chip add" onClick={() => setAddingCat(true)} type="button">+ categoria</button>
+            ) : (
+              <input
+                className="chip-input"
+                autoFocus
+                placeholder="nova categoria"
+                value={newCatLabel}
+                onChange={(e) => setNewCatLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                onBlur={addCategory}
+              />
+            )}
+          </div>
+
+          <button className="carousel-btn" onClick={() => scrollCategoryRow(1)} type="button" aria-label="Próximas categorias">›</button>
         </div>
 
-        <div className="pills-row">
+        <button
+          className="category-manager-toggle"
+          onClick={() => setCategoryManagerOpen((open) => !open)}
+          type="button"
+        >
+          {categoryManagerOpen ? "Fechar categorias" : "Gerenciar categorias"}
+        </button>
+
+        {categoryManagerOpen && (
+          <div className="category-manager">
+            <div className="category-manager-head">
+              <strong>Categorias personalizadas</strong>
+              <span>Exclua as que criou por engano</span>
+            </div>
+
+            {categories.filter((category) => !DEFAULT_CATEGORIES.some((item) => item.id === category.id)).length === 0 ? (
+              <p className="category-manager-empty">Nenhuma categoria personalizada criada ainda.</p>
+            ) : (
+              categories
+                .filter((category) => !DEFAULT_CATEGORIES.some((item) => item.id === category.id))
+                .map((category) => (
+                  <div className="category-manager-item" key={category.id}>
+                    <span>{category.icon} {category.label}</span>
+                    <button onClick={() => removeCategory(category.id)} type="button">Excluir</button>
+                  </div>
+                ))
+            )}
+          </div>
+        )}
+
+        <div className="pills-row payment-row">
           {CARDS.map((card) => (
             <button
               key={card.id}
@@ -713,6 +818,7 @@ export default function App() {
           <span>
             <i style={{ background: card?.color || "#888" }} />
             {card?.name || entry.cardId} {entry.desc ? `· ${entry.desc}` : ""} · {formatDateBR(entry.date)}
+            {!countsAgainstSalary(entry.cardId) && <b className="credit-badge">Crédito · não desconta</b>}
           </span>
         </div>
         <div className="transaction-value">{fmt(entry.value)}</div>
@@ -767,7 +873,7 @@ export default function App() {
         ) : (
           <div className="breakdown-list">
             {perCategory.slice(0, compact ? 4 : perCategory.length).map((row) => {
-              const pct = totalGasto ? Math.round((row.val / totalGasto) * 100) : 0;
+              const pct = totalMovimentado ? Math.round((row.val / totalMovimentado) * 100) : 0;
               return (
                 <div className="breakdown-row" key={row.id}>
                   <div className="breakdown-top">
@@ -882,7 +988,7 @@ export default function App() {
             <div className="large-ring" style={{ "--pct": `${usedPercent}%` }}>
               <strong>{usedPercent}%</strong>
             </div>
-            <p>{fmt(totalGasto)} gastos de {fmt(salary)} disponíveis</p>
+            <p>{fmt(totalGasto)} descontados do salário{totalCredito > 0 ? ` · ${fmt(totalCredito)} no crédito` : ""}</p>
           </div>
 
           <div className="report-card">
@@ -915,7 +1021,7 @@ export default function App() {
           <div className="breakdown-list">
             {CARDS.map((card) => {
               const val = perCard[card.id] || 0;
-              const pct = totalGasto ? Math.round((val / totalGasto) * 100) : 0;
+              const pct = totalMovimentado ? Math.round((val / totalMovimentado) * 100) : 0;
               return (
                 <div className="breakdown-row" key={card.id}>
                   <div className="breakdown-top">
@@ -1496,7 +1602,7 @@ const baseCss = `
 
   .bank-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 14px;
   }
 
@@ -2695,6 +2801,143 @@ const baseCss = `
     }
   }
 
+
+  /* ===== CATEGORIAS: CARROSSEL COM MOUSE + GERENCIADOR ===== */
+  .category-tools {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .carousel-btn {
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 24px;
+    font-weight: 900;
+    display: grid;
+    place-items: center;
+    line-height: 1;
+    transition: 0.18s ease;
+  }
+
+  .carousel-btn:hover {
+    border-color: rgba(167, 139, 250, 0.45);
+    background: rgba(139, 92, 246, 0.16);
+  }
+
+  .category-tools .chips-row {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    cursor: grab;
+    scroll-behavior: smooth;
+    padding-bottom: 0;
+  }
+
+  .category-tools .chips-row:active {
+    cursor: grabbing;
+  }
+
+  .category-manager-toggle {
+    align-self: center;
+    border: 1px solid rgba(167, 139, 250, 0.24);
+    background: rgba(139, 92, 246, 0.10);
+    color: #ddd6fe;
+    border-radius: 999px;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .category-manager {
+    width: 100%;
+    border: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 18px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .category-manager-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .category-manager-head strong {
+    font-size: 14px;
+  }
+
+  .category-manager-head span,
+  .category-manager-empty {
+    color: var(--muted);
+    font-size: 12px;
+    margin: 0;
+  }
+
+  .category-manager-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.035);
+    border-radius: 14px;
+  }
+
+  .category-manager-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 800;
+  }
+
+  .category-manager-item button {
+    border: 1px solid rgba(244, 63, 94, 0.24);
+    background: rgba(244, 63, 94, 0.12);
+    color: #fda4af;
+    border-radius: 999px;
+    padding: 8px 11px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  @media (max-width: 720px) {
+    .category-tools {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .carousel-btn {
+      display: none;
+    }
+
+    .category-manager-toggle {
+      width: 100%;
+    }
+
+    .category-manager-head {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 2px;
+    }
+  }
+
   /* Mantém o ajuste de login desktop que você pediu */
   @media (min-width: 900px) {
     .app-shell.auth-only {
@@ -2734,4 +2977,69 @@ const baseCss = `
     }
   }
 
+
+
+  /* ===== CRÉDITO: NÃO DESCONTA DO SALDO ATUAL ===== */
+  .credit-note {
+    margin-top: 6px !important;
+    color: #fbbf24 !important;
+    font-weight: 800;
+    font-size: 13px;
+  }
+
+  .credit-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(245, 158, 11, 0.24);
+    color: #fbbf24;
+    font-size: 10px;
+    font-weight: 900;
+    white-space: nowrap;
+  }
+
+  @media (min-width: 981px) {
+    .bank-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px) {
+    .payment-row {
+      justify-content: center !important;
+      flex-wrap: wrap !important;
+      overflow: visible !important;
+    }
+
+    .payment-row .pill {
+      flex: 0 1 auto;
+      min-width: 86px;
+      text-align: center;
+      justify-content: center;
+    }
+
+    .filter-card .pills-row.no-margin {
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      overflow: visible !important;
+      padding: 0 !important;
+    }
+
+    .filter-card .pills-row.no-margin .pill {
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      padding: 11px 4px !important;
+      font-size: clamp(9px, 2.7vw, 11px) !important;
+      letter-spacing: -0.04em !important;
+      text-align: center !important;
+      justify-content: center !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
+    }
+  }
 `;
