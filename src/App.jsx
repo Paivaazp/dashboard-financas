@@ -480,7 +480,9 @@ export default function App() {
       <header className="app-header">
         <div>
           <div className="app-eyebrow">Controle financeiro</div>
-          <h1>Olá, Deyvid🥷🏿 </h1> <br></br>
+          <br />
+          <h1>Olá, Deyvid 🥷🏿</h1>
+          <br />
           <p>{syncing ? "Salvando alterações..." : "Suas finanças sincronizadas em todos os dispositivos."}</p>
         </div>
 
@@ -764,7 +766,7 @@ export default function App() {
     return (
       <>
         <section className="page-title-card">
-          <div>
+          <div style={{ textAlign: 'center', width: '100%' }}>
             <span>Lançamentos</span>
             <h2>Histórico de gastos</h2>
             <p>Consulte, filtre e apague seus lançamentos.</p>
@@ -802,6 +804,7 @@ export default function App() {
             <div>
               <h2>Todos os lançamentos</h2>
               <p>{visibleEntries.length} registro(s) encontrado(s)</p>
+              <br />
             </div>
           </div>
 
@@ -2147,6 +2150,443 @@ const baseCss = `
     .filter-card,
     .report-card {
       border-radius: 30px;
+    }
+  }
+
+
+  /* =====================================================
+     CORREÇÕES DO CHATGPT EM CIMA DA SUA VERSÃO
+     - trava overflow lateral no iPhone
+     - melhora desktop sem quebrar mobile
+     - preserva Supabase, abas e suas alterações
+     ===================================================== */
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  .app-shell,
+  .app-main,
+  .app-header,
+  .summary-panel,
+  .summary-grid,
+  .summary-card,
+  .balance-strip,
+  .bank-grid,
+  .bank-card,
+  .home-grid,
+  .home-side,
+  .form-panel,
+  .content-card,
+  .page-title-card,
+  .filter-card,
+  .report-grid,
+  .report-card,
+  .profile-card,
+  .transactions-list,
+  .breakdown-list {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .app-shell {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .app-main {
+    width: min(1120px, 100%);
+  }
+
+  .chips-row,
+  .pills-row {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app-input,
+  .chip-input,
+  .primary-btn,
+  .danger-btn {
+    min-width: 0;
+  }
+
+  .transaction-main,
+  .transaction-main strong,
+  .transaction-main span {
+    min-width: 0;
+  }
+
+  .transaction-value {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Desktop: menu lateral real e conteúdo centralizado */
+  @media (min-width: 900px) {
+    .app-shell {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 34px;
+      padding: 34px 44px 44px;
+      align-items: start;
+    }
+
+    .app-main {
+      grid-column: 2;
+      grid-row: 1;
+      width: min(1240px, 100%);
+      margin: 0 auto;
+    }
+
+    .app-nav {
+      grid-column: 1;
+      grid-row: 1;
+      align-self: start;
+      position: sticky;
+      top: 34px;
+      left: auto;
+      bottom: auto;
+      transform: none;
+      width: 230px;
+      max-width: 230px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-radius: 30px;
+    }
+
+    .app-nav::before {
+      content: "Menu";
+      display: block;
+      padding: 8px 12px 12px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .app-nav button {
+      width: 100%;
+      min-height: 48px;
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 12px;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-size: 14px;
+      text-align: left;
+    }
+
+    .app-nav button span,
+    .app-nav .nav-new span {
+      width: 32px;
+      height: 32px;
+      margin-top: 0;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      font-size: 20px;
+    }
+
+    .app-header {
+      align-items: center;
+    }
+
+    .home-grid {
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+    }
+  }
+
+  /* Tablet e celular: uma coluna, sem largura fantasma */
+  @media (max-width: 899px) {
+    .app-shell {
+      display: block;
+      padding: max(18px, env(safe-area-inset-top)) 10px calc(104px + env(safe-area-inset-bottom));
+    }
+
+    .app-main {
+      width: 100%;
+      max-width: 100%;
+      margin: 0;
+      gap: 16px;
+    }
+
+    .app-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 14px;
+    }
+
+    .app-header h1 {
+      font-size: clamp(28px, 9vw, 38px);
+      line-height: 1.05;
+    }
+
+    .app-header p {
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .header-actions {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 46px;
+      gap: 10px;
+      justify-content: stretch;
+    }
+
+    .month-switcher {
+      width: 100%;
+      min-width: 0;
+      justify-content: space-between;
+      border-radius: 16px;
+    }
+
+    .month-switcher span {
+      min-width: 0;
+      flex: 1;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary-panel,
+    .form-panel,
+    .content-card,
+    .page-title-card,
+    .filter-card,
+    .report-card {
+      border-radius: 24px;
+      padding: 16px;
+    }
+
+    .summary-grid,
+    .form-grid,
+    .report-grid,
+    .home-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .summary-card {
+      min-height: 118px;
+      border-radius: 22px;
+      padding: 18px;
+    }
+
+    .summary-card strong {
+      font-size: clamp(24px, 8vw, 32px);
+    }
+
+    .balance-strip {
+      display: grid;
+      grid-template-columns: 82px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      border-radius: 22px;
+    }
+
+    .ring {
+      width: 82px;
+      height: 82px;
+    }
+
+    .ring span {
+      font-size: 18px;
+    }
+
+    .balance-strip div:last-child strong {
+      font-size: clamp(26px, 9vw, 38px);
+      line-height: 1;
+      word-break: break-word;
+    }
+
+    .bank-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .bank-card {
+      grid-template-columns: 42px minmax(0, 1fr);
+      min-height: 100px;
+      padding: 14px;
+      border-radius: 20px;
+    }
+
+    .bank-card span:nth-child(2),
+    .bank-card strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .section-head {
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .section-head h2 {
+      font-size: 20px;
+    }
+
+    .ghost-btn,
+    .primary-mini {
+      padding: 10px 12px;
+      font-size: 13px;
+      border-radius: 14px;
+    }
+
+    .chips-row,
+    .pills-row {
+      margin-left: -2px;
+      margin-right: -2px;
+      padding-left: 2px;
+      padding-right: 2px;
+    }
+
+    .chip,
+    .pill {
+      padding: 9px 11px;
+      font-size: 12px;
+    }
+
+    label span {
+      text-align: left;
+    }
+
+    .transaction {
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 12px;
+      border-radius: 18px;
+    }
+
+    .transaction-icon {
+      width: 44px;
+      height: 44px;
+    }
+
+    .transaction-value {
+      font-size: 13px;
+      max-width: 96px;
+    }
+
+    .delete-btn {
+      grid-column: 3;
+      grid-row: 2;
+      justify-self: end;
+      width: 32px;
+      height: 32px;
+    }
+
+    .profile-row,
+    .input-row,
+    .page-title-card {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .profile-row strong {
+      text-align: left;
+    }
+
+    .salary-profile {
+      max-width: none;
+    }
+
+    .app-nav {
+      position: fixed;
+      left: 8px;
+      right: 8px;
+      bottom: max(8px, env(safe-area-inset-bottom));
+      transform: none;
+      width: auto;
+      max-width: none;
+      padding: 8px;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 3px;
+      border-radius: 24px;
+    }
+
+    .app-nav::before {
+      content: none;
+    }
+
+    .app-nav button {
+      min-width: 0;
+      padding: 8px 3px;
+      font-size: 10px;
+      border-radius: 16px;
+    }
+
+    .app-nav button span {
+      font-size: 19px;
+    }
+
+    .app-nav .nav-new span {
+      width: 42px;
+      height: 42px;
+      margin-top: -20px;
+    }
+  }
+
+  @media (max-width: 420px) {
+    .app-shell {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    .summary-panel,
+    .form-panel,
+    .content-card,
+    .page-title-card,
+    .filter-card,
+    .report-card {
+      padding: 14px;
+      border-radius: 22px;
+    }
+
+    .bank-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .bank-card {
+      grid-template-columns: 1fr;
+      min-height: 112px;
+      gap: 8px;
+    }
+
+    .bank-icon {
+      grid-row: auto;
+      width: 40px;
+      height: 40px;
+    }
+
+    .balance-strip {
+      grid-template-columns: 76px minmax(0, 1fr);
+    }
+
+    .ring {
+      width: 76px;
+      height: 76px;
     }
   }
 
