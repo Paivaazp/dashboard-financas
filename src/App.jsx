@@ -119,8 +119,52 @@ export default function App() {
   const [listSearch, setListSearch] = useState("");
   const [saveError, setSaveError] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [profileImage, setProfileImage] = useState("");
 
   const user = session?.user || null;
+
+  useEffect(() => {
+    if (!user?.id) {
+      setProfileImage("");
+      return;
+    }
+
+    const savedImage = localStorage.getItem(`finance-profile-image-${user.id}`);
+    setProfileImage(savedImage || "");
+  }, [user?.id]);
+
+  function handleProfileImageChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setSaveError("Escolha um arquivo de imagem válido.");
+      return;
+    }
+
+    if (file.size > 1024 * 1024 * 2) {
+      setSaveError("Escolha uma imagem de até 2 MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = String(reader.result || "");
+      setProfileImage(image);
+      if (user?.id) {
+        localStorage.setItem(`finance-profile-image-${user.id}`, image);
+      }
+      setSaveError("");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeProfileImage() {
+    setProfileImage("");
+    if (user?.id) {
+      localStorage.removeItem(`finance-profile-image-${user.id}`);
+    }
+  }
 
   const loadData = useCallback(async (userId, options = {}) => {
     if (!supabase || !userId) return;
@@ -480,7 +524,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <div className="app-eyebrow">Controle financeiro</div>
-          <h1>Olá, Deyvid 🥷🏿</h1>
+          <h1>Olá, Deyvid🥷🏿 </h1> <br></br>
           <p>{syncing ? "Salvando alterações..." : "Suas finanças sincronizadas em todos os dispositivos."}</p>
         </div>
 
@@ -562,7 +606,7 @@ export default function App() {
 
   function renderEntryForm({ title = "Novo lançamento", subtitle = "Registre uma nova despesa" } = {}) {
     return (
-      <section className="form-panel">
+      <section className="form-panel form-panel-centered">
         <div className="section-head">
           <div className="section-title-icon">▣</div>
           <div>
@@ -763,7 +807,7 @@ export default function App() {
   function renderTransactions() {
     return (
       <>
-        <section className="page-title-card">
+        <section className="page-title-card page-title-centered">
           <div>
             <span>Lançamentos</span>
             <h2>Histórico de gastos</h2>
@@ -895,12 +939,34 @@ export default function App() {
     return (
       <>
         <section className="page-title-card profile-head">
-          <div>
-            <span>Perfil</span>
-            <h2>Sua conta</h2>
-            <p>Gerencie sua sessão e configurações principais.</p>
+          <div className="profile-cover">
+            <label className="avatar avatar-upload" title="Alterar foto de perfil">
+              {profileImage ? (
+                <img src={profileImage} alt="Foto de perfil" />
+              ) : (
+                <span>{(user?.email || "D").slice(0, 1).toUpperCase()}</span>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleProfileImageChange}
+                aria-label="Alterar foto de perfil"
+              />
+              <em>Trocar</em>
+            </label>
+
+            <div className="profile-title">
+              <span>Perfil</span>
+              <h2>Sua conta</h2>
+              <p>Gerencie sua sessão e configurações principais.</p>
+            </div>
+
+            {profileImage && (
+              <button className="avatar-remove" onClick={removeProfileImage} type="button">
+                Remover foto
+              </button>
+            )}
           </div>
-          <div className="avatar">{(user?.email || "D").slice(0, 1).toUpperCase()}</div>
         </section>
 
         <section className="content-card profile-card">
@@ -2151,13 +2217,7 @@ const baseCss = `
   }
 
 
-  /* =====================================================
-     CORREÇÕES DO CHATGPT EM CIMA DA SUA VERSÃO
-     - trava overflow lateral no iPhone
-     - melhora desktop sem quebrar mobile
-     - preserva Supabase, abas e suas alterações
-     ===================================================== */
-
+  /* ===== AJUSTES FINOS SOLICITADOS ===== */
   html,
   body,
   #root {
@@ -2166,464 +2226,295 @@ const baseCss = `
     overflow-x: hidden;
   }
 
-  body {
-    min-width: 0;
-  }
-
   .app-shell,
-  .app-main,
-  .app-header,
-  .summary-panel,
-  .summary-grid,
-  .summary-card,
-  .balance-strip,
-  .bank-grid,
-  .bank-card,
-  .home-grid,
-  .home-side,
-  .form-panel,
-  .content-card,
-  .page-title-card,
-  .filter-card,
-  .report-grid,
-  .report-card,
-  .profile-card,
-  .transactions-list,
-  .breakdown-list {
+  .app-main {
     max-width: 100%;
-    min-width: 0;
-  }
-
-  .app-shell {
-    width: 100%;
-    max-width: 100vw;
     overflow-x: hidden;
   }
 
-  .app-main {
-    width: min(1120px, 100%);
+  .profile-head {
+    justify-content: center;
+    text-align: center;
   }
 
-  .chips-row,
-  .pills-row {
+  .profile-cover {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  .profile-title span {
+    display: block;
+    color: var(--purple);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.28em;
+    margin-bottom: 8px;
+  }
+
+  .profile-title h2 {
+    margin: 0;
+  }
+
+  .avatar.avatar-upload {
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .avatar.avatar-upload input {
+    display: none;
+  }
+
+  .avatar.avatar-upload img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .avatar.avatar-upload > span {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+  }
+
+  .avatar.avatar-upload em {
+    position: absolute;
+    inset-inline: 8px;
+    bottom: 8px;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.58);
+    color: #fff;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 900;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: 0.18s ease;
+  }
+
+  .avatar.avatar-upload:hover em,
+  .avatar.avatar-upload:focus-within em {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .avatar-remove {
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 9px 13px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .chips-row {
+    width: 100%;
     max-width: 100%;
+    flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
   }
 
-  .app-input,
-  .chip-input,
-  .primary-btn,
-  .danger-btn {
-    min-width: 0;
+  .chip {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
   }
 
-  .transaction-main,
-  .transaction-main strong,
-  .transaction-main span {
-    min-width: 0;
+  .pills-row {
+    align-items: center;
   }
 
-  .transaction-value {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
   }
 
-  /* Desktop: menu lateral real e conteúdo centralizado */
-  @media (min-width: 900px) {
-    .app-shell {
+  @media (max-width: 720px) {
+    .profile-head {
+      padding-top: 30px;
+    }
+
+    .profile-cover {
+      gap: 18px;
+    }
+
+    .profile-cover .avatar {
+      width: 112px;
+      height: 112px;
+      border-radius: 34px;
+      order: 1;
+    }
+
+    .profile-title {
+      order: 2;
+    }
+
+    .avatar-remove {
+      order: 3;
+    }
+
+    .form-panel .section-head {
+      align-items: center;
+      text-align: center;
+    }
+
+    .form-panel .section-head > div:last-child {
+      flex: 1;
+    }
+
+    .form-panel .chips-row {
+      padding-inline: 0;
+      margin-inline: 0;
+    }
+
+    .form-panel .chip {
+      min-height: 42px;
+    }
+
+    .form-panel .pills-row {
       display: grid;
-      grid-template-columns: 230px minmax(0, 1fr);
-      gap: 34px;
-      padding: 34px 44px 44px;
-      align-items: start;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      overflow: visible;
+      padding-bottom: 0;
     }
 
-    .app-main {
-      grid-column: 2;
-      grid-row: 1;
-      width: min(1240px, 100%);
-      margin: 0 auto;
+    .form-panel .pills-row .pill {
+      width: 100%;
+      min-width: 0;
+      padding: 12px 6px;
+      font-size: clamp(11px, 3.1vw, 13px);
     }
 
-    .app-nav {
-      grid-column: 1;
-      grid-row: 1;
-      align-self: start;
-      position: sticky;
-      top: 34px;
-      left: auto;
-      bottom: auto;
-      transform: none;
-      width: 230px;
-      max-width: 230px;
-      padding: 16px;
+    .filter-card .pills-row.no-margin {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 7px;
+      overflow: visible;
+      padding-bottom: 0;
+    }
+
+    .filter-card .pills-row.no-margin .pill {
+      width: 100%;
+      min-width: 0;
+      padding: 11px 3px;
+      font-size: clamp(9px, 2.65vw, 12px);
+      letter-spacing: -0.02em;
+    }
+  }
+
+  @media (max-width: 390px) {
+    .filter-card .pills-row.no-margin {
+      gap: 5px;
+    }
+
+    .filter-card .pills-row.no-margin .pill {
+      font-size: 9.8px;
+      padding-inline: 2px;
+    }
+  }
+
+
+  /* ===== AJUSTES PEDIDOS: ALTURA DOS CARDS E TÍTULOS CENTRALIZADOS ===== */
+
+  @media (min-width: 981px) {
+    .home-grid {
+      align-items: stretch;
+    }
+
+    .home-grid > .form-panel {
+      height: 100%;
+      min-height: 100%;
+    }
+
+    .home-grid > .home-side {
+      height: 100%;
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      border-radius: 30px;
     }
 
-    .app-nav::before {
-      content: "Menu";
-      display: block;
-      padding: 8px 12px 12px;
-      color: var(--muted2);
-      font-size: 12px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-    }
-
-    .app-nav button {
-      width: 100%;
-      min-height: 48px;
-      flex-direction: row;
-      justify-content: flex-start;
-      gap: 12px;
-      border-radius: 16px;
-      padding: 12px 14px;
-      font-size: 14px;
-      text-align: left;
-    }
-
-    .app-nav button span,
-    .app-nav .nav-new span {
-      width: 32px;
-      height: 32px;
-      margin-top: 0;
-      display: grid;
-      place-items: center;
-      flex: 0 0 auto;
-      font-size: 20px;
-    }
-
-    .app-header {
-      align-items: center;
-    }
-
-    .home-grid {
-      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-    }
-  }
-
-  /* Tablet e celular: uma coluna, sem largura fantasma */
-  @media (max-width: 899px) {
-    .app-shell {
-      display: block;
-      padding: max(18px, env(safe-area-inset-top)) 10px calc(104px + env(safe-area-inset-bottom));
-    }
-
-    .app-main {
-      width: 100%;
-      max-width: 100%;
-      margin: 0;
-      gap: 16px;
-    }
-
-    .app-header {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 14px;
-    }
-
-    .app-header h1 {
-      font-size: clamp(28px, 9vw, 38px);
-      line-height: 1.05;
-    }
-
-    .app-header p {
-      font-size: 14px;
-      line-height: 1.4;
-    }
-
-    .header-actions {
-      width: 100%;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 46px;
-      gap: 10px;
-      justify-content: stretch;
-    }
-
-    .month-switcher {
-      width: 100%;
-      min-width: 0;
-      justify-content: space-between;
-      border-radius: 16px;
-    }
-
-    .month-switcher span {
-      min-width: 0;
+    .home-side .content-card {
       flex: 1;
-      font-size: 13px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
+  }
 
-    .summary-panel,
-    .form-panel,
-    .content-card,
-    .page-title-card,
-    .filter-card,
-    .report-card {
-      border-radius: 24px;
-      padding: 16px;
-    }
+  .page-title-card.page-title-centered {
+    position: relative;
+    justify-content: center;
+    text-align: center;
+    align-items: center;
+  }
 
-    .summary-grid,
-    .form-grid,
-    .report-grid,
-    .home-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
+  .page-title-card.page-title-centered > div {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    text-align: center;
+  }
 
-    .summary-card {
-      min-height: 118px;
-      border-radius: 22px;
-      padding: 18px;
-    }
+  .page-title-card.page-title-centered .primary-mini {
+    position: absolute;
+    right: 22px;
+    top: 22px;
+  }
 
-    .summary-card strong {
-      font-size: clamp(24px, 8vw, 32px);
-    }
+  .form-panel.form-panel-centered .section-head {
+    position: relative;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    min-height: 58px;
+  }
 
-    .balance-strip {
-      display: grid;
-      grid-template-columns: 82px minmax(0, 1fr);
-      gap: 16px;
-      align-items: center;
-      padding: 16px;
-      border-radius: 22px;
-    }
+  .form-panel.form-panel-centered .section-head > div:last-child {
+    width: 100%;
+    text-align: center;
+  }
 
-    .ring {
-      width: 82px;
-      height: 82px;
-    }
+  .form-panel.form-panel-centered .section-title-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
 
-    .ring span {
-      font-size: 18px;
-    }
-
-    .balance-strip div:last-child strong {
-      font-size: clamp(26px, 9vw, 38px);
-      line-height: 1;
-      word-break: break-word;
-    }
-
-    .bank-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .bank-card {
-      grid-template-columns: 42px minmax(0, 1fr);
-      min-height: 100px;
-      padding: 14px;
-      border-radius: 20px;
-    }
-
-    .bank-card span:nth-child(2),
-    .bank-card strong {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .section-head {
-      align-items: flex-start;
-      gap: 12px;
-    }
-
-    .section-head h2 {
-      font-size: 20px;
-    }
-
-    .ghost-btn,
-    .primary-mini {
-      padding: 10px 12px;
-      font-size: 13px;
-      border-radius: 14px;
-    }
-
-    .chips-row,
-    .pills-row {
-      margin-left: -2px;
-      margin-right: -2px;
-      padding-left: 2px;
-      padding-right: 2px;
-    }
-
-    .chip,
-    .pill {
-      padding: 9px 11px;
-      font-size: 12px;
-    }
-
-    label span {
-      text-align: left;
-    }
-
-    .transaction {
-      grid-template-columns: 44px minmax(0, 1fr) auto;
-      gap: 10px;
-      padding: 12px;
-      border-radius: 18px;
-    }
-
-    .transaction-icon {
-      width: 44px;
-      height: 44px;
-    }
-
-    .transaction-value {
-      font-size: 13px;
-      max-width: 96px;
-    }
-
-    .delete-btn {
-      grid-column: 3;
-      grid-row: 2;
-      justify-self: end;
-      width: 32px;
-      height: 32px;
-    }
-
-    .profile-row,
-    .input-row,
-    .page-title-card {
+  @media (max-width: 720px) {
+    .page-title-card.page-title-centered {
+      display: flex;
       flex-direction: column;
-      align-items: stretch;
+      justify-content: center;
+      text-align: center;
     }
 
-    .profile-row strong {
-      text-align: left;
-    }
-
-    .salary-profile {
-      max-width: none;
-    }
-
-    .app-nav {
-      position: fixed;
-      left: 8px;
-      right: 8px;
-      bottom: max(8px, env(safe-area-inset-bottom));
-      transform: none;
-      width: auto;
-      max-width: none;
-      padding: 8px;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 3px;
-      border-radius: 24px;
-    }
-
-    .app-nav::before {
-      content: none;
-    }
-
-    .app-nav button {
-      min-width: 0;
-      padding: 8px 3px;
-      font-size: 10px;
-      border-radius: 16px;
-    }
-
-    .app-nav button span {
-      font-size: 19px;
-    }
-
-    .app-nav .nav-new span {
-      width: 42px;
-      height: 42px;
-      margin-top: -20px;
-    }
-  }
-
-  @media (max-width: 420px) {
-    .app-shell {
-      padding-left: 8px;
-      padding-right: 8px;
-    }
-
-    .summary-panel,
-    .form-panel,
-    .content-card,
-    .page-title-card,
-    .filter-card,
-    .report-card {
-      padding: 14px;
-      border-radius: 22px;
-    }
-
-    .bank-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .bank-card {
-      grid-template-columns: 1fr;
-      min-height: 112px;
-      gap: 8px;
-    }
-
-    .bank-icon {
-      grid-row: auto;
-      width: 40px;
-      height: 40px;
-    }
-
-    .balance-strip {
-      grid-template-columns: 76px minmax(0, 1fr);
-    }
-
-    .ring {
-      width: 76px;
-      height: 76px;
-    }
-  }
-
-
-  /* ===== FIX: MENU LATERAL FIXO NO DESKTOP =====
-     Mantém a sidebar parada enquanto o conteúdo rola.
-     No mobile continua a barra inferior fixa. */
-  @media (min-width: 900px) {
-    .app-shell {
-      display: block !important;
-      padding: 34px 44px 44px 292px !important;
+    .page-title-card.page-title-centered .primary-mini {
+      position: static;
       width: 100%;
-      max-width: 100vw;
-      overflow-x: hidden;
+      margin-top: 14px;
+      text-align: center;
     }
 
-    .app-main {
-      grid-column: auto !important;
-      grid-row: auto !important;
-      width: min(1240px, 100%) !important;
-      margin: 0 auto !important;
+    .form-panel.form-panel-centered .section-head {
+      min-height: 0;
+      padding-top: 0;
     }
 
-    .app-nav {
-      position: fixed !important;
-      left: 28px !important;
-      top: 34px !important;
-      bottom: auto !important;
-      transform: none !important;
-      width: 230px !important;
-      max-width: 230px !important;
-      max-height: calc(100vh - 68px);
-      overflow-y: auto;
-      overflow-x: hidden;
-      z-index: 50;
-    }
-
-    .app-nav::-webkit-scrollbar {
-      width: 0;
-      height: 0;
+    .form-panel.form-panel-centered .section-title-icon {
+      position: static;
+      margin: 0 auto 10px;
     }
   }
 
