@@ -2518,4 +2518,220 @@ const baseCss = `
     }
   }
 
+
+  /* ===== FIX FINAL MOBILE: PERFIL, FILTROS E DATA ===== */
+
+  /* Mantém o card do perfil igual no PC e força a foto acima do texto no mobile */
+  .profile-head .profile-cover {
+    width: 100%;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  .profile-head .avatar.avatar-upload,
+  .profile-head .profile-cover > .avatar,
+  .profile-head label.avatar {
+    order: -2 !important;
+    margin: 0 auto 14px !important;
+  }
+
+  .profile-head .profile-title {
+    order: -1 !important;
+    width: 100%;
+    text-align: center !important;
+  }
+
+  .profile-head .avatar-remove {
+    order: 3 !important;
+    margin: 2px auto 0 !important;
+  }
+
+  /* Trava qualquer overflow lateral no iPhone */
+  @media (max-width: 720px) {
+    html,
+    body,
+    #root,
+    .app-shell,
+    .app-main {
+      width: 100% !important;
+      max-width: 100vw !important;
+      overflow-x: hidden !important;
+    }
+
+    .app-shell {
+      padding-left: max(10px, env(safe-area-inset-left)) !important;
+      padding-right: max(10px, env(safe-area-inset-right)) !important;
+    }
+
+    .summary-panel,
+    .form-panel,
+    .content-card,
+    .page-title-card,
+    .filter-card,
+    .report-card,
+    .profile-card {
+      width: 100% !important;
+      max-width: 100% !important;
+      overflow: hidden !important;
+    }
+
+    /* Perfil: foto acima do texto Sua conta */
+    .profile-head {
+      text-align: center !important;
+      align-items: center !important;
+      justify-content: center !important;
+    }
+
+    .profile-head .profile-cover {
+      gap: 10px !important;
+    }
+
+    .profile-head .avatar.avatar-upload,
+    .profile-head .profile-cover > .avatar,
+    .profile-head label.avatar {
+      width: 118px !important;
+      height: 118px !important;
+      border-radius: 34px !important;
+      order: -2 !important;
+      margin: 0 auto 12px !important;
+      flex: 0 0 auto !important;
+    }
+
+    .profile-head .profile-title {
+      order: -1 !important;
+      width: 100% !important;
+      text-align: center !important;
+    }
+
+    .profile-head .profile-title span,
+    .profile-head .profile-title h2,
+    .profile-head .profile-title p {
+      text-align: center !important;
+    }
+
+    /* Novo lançamento: data, valor e descrição sempre do mesmo tamanho */
+    .form-panel,
+    .form-panel * {
+      max-width: 100%;
+    }
+
+    .form-grid {
+      width: 100% !important;
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) !important;
+      gap: 18px !important;
+      overflow: hidden !important;
+    }
+
+    .form-grid label,
+    .form-panel label {
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      display: block !important;
+    }
+
+    .app-input,
+    input.app-input,
+    input[type="date"].app-input,
+    input[type="text"].app-input {
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      display: block !important;
+    }
+
+    /* Filtros da tela Lançamentos cabendo na tela sem cortar Pix */
+    .filter-card {
+      padding-left: 14px !important;
+      padding-right: 14px !important;
+    }
+
+    .filter-card .pills-row.no-margin {
+      width: 100% !important;
+      max-width: 100% !important;
+      display: grid !important;
+      grid-template-columns: 0.86fr 1.08fr 1.08fr 1.32fr 0.66fr !important;
+      gap: 6px !important;
+      overflow: visible !important;
+      padding: 0 !important;
+    }
+
+    .filter-card .pills-row.no-margin .pill {
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      padding: 11px 2px !important;
+      border-radius: 18px !important;
+      font-size: clamp(9px, 2.45vw, 11px) !important;
+      line-height: 1 !important;
+      letter-spacing: -0.04em !important;
+      text-align: center !important;
+      justify-content: center !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
+    }
+  }
+
+  @media (max-width: 390px) {
+    .filter-card {
+      padding-left: 12px !important;
+      padding-right: 12px !important;
+    }
+
+    .filter-card .pills-row.no-margin {
+      gap: 4px !important;
+      grid-template-columns: 0.86fr 1.06fr 1.06fr 1.34fr 0.64fr !important;
+    }
+
+    .filter-card .pills-row.no-margin .pill {
+      font-size: 8.8px !important;
+      padding-left: 1px !important;
+      padding-right: 1px !important;
+    }
+  }
+
+  /* Mantém o ajuste de login desktop que você pediu */
+  @media (min-width: 900px) {
+    .app-shell.auth-only {
+      padding: 28px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      min-height: 100vh;
+    }
+
+    .app-shell.auth-only .auth-card {
+      margin: 0 auto !important;
+      width: min(520px, calc(100vw - 48px));
+      max-width: 520px;
+    }
+
+    .auth-card h1 {
+      font-size: 58px;
+      line-height: 0.92;
+      letter-spacing: -0.06em;
+      margin: 8px 0 14px;
+      text-align: center;
+    }
+
+    .auth-card p {
+      max-width: 390px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.45;
+      text-align: center;
+    }
+  }
+
+  @media (max-width: 899px) {
+    .auth-card h1 {
+      line-height: 0.95;
+    }
+  }
+
 `;
