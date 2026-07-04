@@ -480,9 +480,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <div className="app-eyebrow">Controle financeiro</div>
-          <br />
           <h1>Olá, Deyvid 🥷🏿</h1>
-          <br />
           <p>{syncing ? "Salvando alterações..." : "Suas finanças sincronizadas em todos os dispositivos."}</p>
         </div>
 
@@ -766,7 +764,7 @@ export default function App() {
     return (
       <>
         <section className="page-title-card">
-          <div style={{ textAlign: 'center', width: '100%' }}>
+          <div>
             <span>Lançamentos</span>
             <h2>Histórico de gastos</h2>
             <p>Consulte, filtre e apague seus lançamentos.</p>
@@ -804,7 +802,6 @@ export default function App() {
             <div>
               <h2>Todos os lançamentos</h2>
               <p>{visibleEntries.length} registro(s) encontrado(s)</p>
-              <br />
             </div>
           </div>
 
@@ -2587,6 +2584,46 @@ const baseCss = `
     .ring {
       width: 76px;
       height: 76px;
+    }
+  }
+
+
+  /* ===== FIX: MENU LATERAL FIXO NO DESKTOP =====
+     Mantém a sidebar parada enquanto o conteúdo rola.
+     No mobile continua a barra inferior fixa. */
+  @media (min-width: 900px) {
+    .app-shell {
+      display: block !important;
+      padding: 34px 44px 44px 292px !important;
+      width: 100%;
+      max-width: 100vw;
+      overflow-x: hidden;
+    }
+
+    .app-main {
+      grid-column: auto !important;
+      grid-row: auto !important;
+      width: min(1240px, 100%) !important;
+      margin: 0 auto !important;
+    }
+
+    .app-nav {
+      position: fixed !important;
+      left: 28px !important;
+      top: 34px !important;
+      bottom: auto !important;
+      transform: none !important;
+      width: 230px !important;
+      max-width: 230px !important;
+      max-height: calc(100vh - 68px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      z-index: 50;
+    }
+
+    .app-nav::-webkit-scrollbar {
+      width: 0;
+      height: 0;
     }
   }
 
