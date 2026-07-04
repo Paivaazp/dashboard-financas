@@ -10,7 +10,7 @@ const CARDS = [
   { id: "nubank", name: "Nubank", short: "Nu", color: "#8A05BE", text: "#FFFFFF", icon: "◫" },
   { id: "picpay", name: "PicPay", short: "Pi", color: "#21C25E", text: "#071D12", icon: "◩" },
   { id: "santander", name: "Santander", short: "St", color: "#EC0000", text: "#FFFFFF", icon: "◭" },
-  { id: "dinheiro", name: "Dinheiro/Outro", short: "R$", color: "#313743", text: "#FFFFFF", icon: "◉" },
+  { id: "dinheiro", name: "Pix", short: "R$", color: "#313743", text: "#FFFFFF", icon: "◉" },
 ];
 
 const DEFAULT_CATEGORIES = [
@@ -480,7 +480,7 @@ export default function App() {
       <header className="app-header">
         <div>
           <div className="app-eyebrow">Controle financeiro</div>
-          <h1>Olá, Deyvid 👋</h1>
+          <h1>Olá, Deyvid🥷🏿 </h1> <br></br>
           <p>{syncing ? "Salvando alterações..." : "Suas finanças sincronizadas em todos os dispositivos."}</p>
         </div>
 
@@ -707,11 +707,11 @@ export default function App() {
     return (
       <section className="content-card">
         <div className="section-head">
-          <div>
+          <div style={{ textAlign: 'center', width: '100%' }}>
             <h2>Gastos por categoria</h2>
-            <p>{perCategory.length ? "Onde seu dinheiro foi neste mês" : "Os gastos por categoria aparecerão aqui."}</p>
+            <p>{perCategory.length ? "Onde seu dinheiro foi neste mês"  : "Os gastos por categoria aparecerão aqui."}</p>
+            <br />
           </div>
-          <span className="mini-select">Este mês</span>
         </div>
 
         {perCategory.length === 0 ? (
@@ -825,8 +825,8 @@ export default function App() {
     return (
       <>
         <section className="page-title-card">
-          <div>
-            <span>Relatórios</span>
+          <div style={{ textAlign: 'center', width: '100%' }}>
+            <span> Relatórios</span>
             <h2>Análise do mês</h2>
             <p>Resumo visual para entender seus gastos em {shortMonthLabel}.</p>
           </div>
@@ -862,9 +862,10 @@ export default function App() {
 
         <section className="content-card">
           <div className="section-head">
-            <div>
+            <div style={{ textAlign: 'center', width: '100%' }} >
               <h2>Gastos por cartão</h2>
               <p>Comparativo dos meios de pagamento</p>
+              <br />
             </div>
           </div>
           <div className="breakdown-list">
@@ -920,7 +921,7 @@ export default function App() {
               className="app-input salary-profile"
               value={salaryInput}
               inputMode="decimal"
-              placeholder="0,00"
+              placeholder="R$ 0,00"
               onChange={(e) => setSalaryInput(e.target.value)}
               onBlur={commitSalary}
             />
@@ -933,7 +934,7 @@ export default function App() {
     );
   }
 
-  function renderActiveTab() {
+  function renderActiveTab() { 
     if (activeTab === "transactions") return renderTransactions();
     if (activeTab === "new") return renderEntryForm({ title: "Novo lançamento", subtitle: "Cadastre um gasto com categoria, cartão e descrição." });
     if (activeTab === "reports") return renderReports();
@@ -2060,4 +2061,93 @@ const baseCss = `
       padding: 8px 3px;
     }
   }
+
+
+  /* ===== AJUSTE DESKTOP PROFISSIONAL =====
+     No PC vira painel central com menu lateral.
+     No celular continua com barra inferior tipo app. */
+  @media (min-width: 900px) {
+    .app-shell {
+      padding: 34px 44px 44px 292px;
+    }
+
+    .app-main {
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      gap: 24px;
+    }
+
+    .app-nav {
+      left: 28px;
+      top: 50%;
+      bottom: auto;
+      transform: translateY(-50%);
+      width: 230px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-radius: 30px;
+      background: linear-gradient(145deg, rgba(22, 29, 47, 0.92), rgba(13, 18, 31, 0.86));
+      border: 1px solid var(--line);
+    }
+
+    .app-nav::before {
+      content: "Menu";
+      display: block;
+      padding: 8px 12px 12px;
+      color: var(--muted2);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .app-nav button {
+      width: 100%;
+      min-height: 48px;
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 12px;
+      border-radius: 16px;
+      padding: 12px 14px;
+      font-size: 14px;
+      text-align: left;
+    }
+
+    .app-nav button span {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      font-size: 20px;
+    }
+
+    .app-nav .nav-new span {
+      width: 32px;
+      height: 32px;
+      margin-top: 0;
+      box-shadow: 0 10px 26px rgba(139, 92, 246, 0.30);
+    }
+
+    .app-nav button.active {
+      background: rgba(139, 92, 246, 0.18);
+      color: #ffffff;
+    }
+
+    .app-header {
+      align-items: center;
+    }
+
+    .summary-panel,
+    .form-panel,
+    .content-card,
+    .page-title-card,
+    .filter-card,
+    .report-card {
+      border-radius: 30px;
+    }
+  }
+
 `;
